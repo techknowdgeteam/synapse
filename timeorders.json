@@ -1,0 +1,28 @@
+{
+    "fullorders": [
+        {"12hours": "12:00 AM", "24hours": "00:00"},
+        {"12hours": "02:00 AM", "24hours": "02:00"},
+        {"12hours": "04:00 AM", "24hours": "04:00"},
+        {"12hours": "06:00 AM", "24hours": "06:00"},
+        {"12hours": "08:00 AM", "24hours": "08:00"},
+        {"12hours": "10:00 AM", "24hours": "10:00"},
+        {"12hours": "12:00 PM", "24hours": "12:00"},
+        {"12hours": "02:00 PM", "24hours": "14:00"},
+        {"12hours": "04:00 PM", "24hours": "16:00"},
+        {"12hours": "06:00 PM", "24hours": "18:00"},
+        {"12hours": "08:00 PM", "24hours": "20:00"},
+        {"12hours": "10:00 PM", "24hours": "22:00"}
+    ],
+    "oneorder": [
+        {"12hours": "07:00 AM", "24hours": "07:00"}
+    ],
+    "twoorders": [
+        {"12hours": "08:00 AM", "24hours": "08:00"},
+        {"12hours": "12:00 PM", "24hours": "12:00"}
+    ],
+    "threeorders": [
+        {"12hours": "08:00 AM", "24hours": "08:00"},
+        {"12hours": "12:00 PM", "24hours": "12:00"},
+        {"12hours": "04:00 PM", "24hours": "16:00"}
+    ]
+}

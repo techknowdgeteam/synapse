@@ -1,0 +1,17 @@
+{
+  "bybit1": {
+    "LOGIN_ID": "4836528",
+    "PASSWORD": "@Techknowdge12#",
+    "SERVER": "Bybit-Live",
+    "POSITION": "developer",
+    "BASE_FOLDER": "C:\\xampp\\htdocs\\synapse\\synarex\\usersdata\\ohlc",
+    "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Bybit 1\\terminal64.exe"
+  },
+  "deriv6": {
+    "LOGIN_ID": "101347351",
+    "PASSWORD": "@Techknowdge12#",
+    "SERVER": "DerivSVG-Server-02",
+    "BASE_FOLDER": "C:\\xampp\\htdocs\\synapse\\synarex\\usersdata\\ohlc",
+    "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Deriv 6\\terminal64.exe"
+  }
+}

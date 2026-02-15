@@ -1,0 +1,30 @@
+
+  "deriv6": {
+    "LOGIN_ID": "101347351",
+    "PASSWORD": "@Techknowdge12#",
+    "SERVER": "DerivSVG-Server-02",
+    "INVESTED_WITH": "deriv6_key_level",
+    "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Deriv 6\\terminal64.exe"
+  },
+  
+  "deriv7": {
+    "LOGIN_ID": "140357853",
+    "PASSWORD": "@Ayomide12#",
+    "SERVER": "DerivSVG-Server-03",
+    "INVESTED_WITH": "deriv6_key_level",
+    "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\mt5\\MetaTrader 5 Deriv 7\\terminal64.exe"
+  },
+  "bybit1": {
+    "LOGIN_ID": "4836528",
+    "PASSWORD": "@Techknowdge12#",
+    "SERVER": "Bybit-Live",
+    "INVESTED_WITH": "deriv6_key_level",
+    "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Bybit 1\\terminal64.exe"
+  },
+  "exness1": {
+    "LOGIN_ID": "63876912",
+    "PASSWORD": "iamKennyking12#",
+    "SERVER": "Exness-MT5Real9",
+    "INVESTED_WITH": "deriv6_key_level",
+    "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 exness 1\\terminal64.exe"
+  }

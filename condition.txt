@@ -1,0 +1,24 @@
+Behind
+identical:
+reference     |    current
+higher high vs higher high: refrence higher high  high must be > current higher high high, current higher high high must be lower  (cause the current must be behind reference)
+
+lower low vs lower low: reference lower low low must be < current lower low low, current lower low low must be higher  (cause the current lower low must be behind reference)
+
+opposite
+higher high vs lower low: reference higher high low must be >current lower low high, current lower low high must be lower  (cause the current lower low must be behind the reference)
+
+lower low vs higher high: reference lower low  high must be lower < current higher high low, current higher high low must be higher(cause the current must be behind reference)
+
+Beyond
+identical:
+reference      |    current
+higher high vs higher high: reference higher high  high must be < current higher high high, current  higher high high must be > reference higher high high (cause it says beyond reference)
+
+lower low vs lower low: reference lower low low must be > current lower low low , current lower low low must be lower < than reference lower low low cause it says beyond
+
+opposite:
+reference      |    current
+higher high vs lower low: reference higher high high must be < current lower low low, current lower low low must be >  reference higher high high cause (lower low current in its prime must be lower(cause it says beyond reference))
+
+lower low vs higher high: reference lower low low must be < current higher high high, current higher high in its prime must be higher cause it says beyond reference

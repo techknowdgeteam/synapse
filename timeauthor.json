@@ -1,0 +1,12 @@
+{
+    "author": "sunshine",
+    "inputpath": "C:\\xampp\\htdocs\\serenum\\files\\jpgs\\authorvalue",
+    "outputpath": "C:\\xampp\\htdocs\\serenum\\files\\next jpg\\authorvalue",
+    "page": "none",
+    "group": "include",
+    "processpathfrom": "uploadedjpgs",
+    "schedule_date": "none",
+    "type": "fullorders",
+    "group_types": "others",
+    "group_switch": "no"
+}

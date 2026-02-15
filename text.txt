@@ -1,0 +1,20 @@
+
+            "lowerhighsandhigherlows": {
+                "filename":"childswing.json",
+                "read_candles_from":"new_old",
+                "number_candles":"define_candle",
+                "NEIGHBOR_LEFT": 6,
+                "NEIGHBOR_RIGHT": 6,
+                "label":{
+                    "lowerhighs_text": "LH",
+                    "higherlows_text": "HL",
+                    "label_at": {
+                        "higherlows":"low",
+                        "higherlows_color":"green",
+                        "higherlows_marker": "arrow",
+                        "lower_highs":"high",
+                        "lower_highs_color":"red",
+                        "lower_highs_marker": "arrow"
+                    }
+                }
+            },
