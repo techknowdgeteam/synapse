@@ -18,8 +18,8 @@ import shutil
 from collections import defaultdict
 
 
-DEV_PATH = r'C:\xampp\htdocs\synapse\synarex\usersdata\developers'
-DEV_USERS = r'C:\xampp\htdocs\synapse\synarex\usersdata\developers\developers.json'
+DEV_PATH = r'C:\xampp\htdocs\chronedge\synarex\usersdata\developers'
+DEV_USERS = r'C:\xampp\htdocs\chronedge\synarex\usersdata\developers\developers.json'
 
 def load_developers_dictionary():
     # Corrected os.path.exists logic
@@ -37,7 +37,7 @@ def load_developers_dictionary():
         return {}
 
 def get_account_management(broker_name):
-    path = os.path.join(r"C:\xampp\htdocs\synapse\synarex\usersdata\developers", broker_name, "accountmanagement.json")
+    path = os.path.join(r"C:\xampp\htdocs\chronedge\synarex\usersdata\developers", broker_name, "accountmanagement.json")
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)

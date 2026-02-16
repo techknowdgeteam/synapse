@@ -39,12 +39,14 @@ def place_demo_orders():
     except Exception as e:
         print(f"Error in placedemoorders: {e}")
 
-def main():
+def run_trade():
     fetch_ohlc()
     technical_analysis()
     calculate_prices()
-    place_demo_orders()
-    time.sleep(60)
-main()
+    place_orders()
+    time.sleep(1800)
+    run_trade()
+if __name__ == "__main__":
+   run_trade()
 
 

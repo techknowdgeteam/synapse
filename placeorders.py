@@ -385,23 +385,27 @@ def check_limit_orders_risk():
         acc_info = mt5.account_info()
         balance = acc_info.balance
 
-        # Determine Primary Risk Value
+        # Determine Primary Risk Value - FIXED: Keep as float
         primary_risk = None
+        primary_risk_original = None
         for range_str, r_val in risk_map.items():
             try:
                 raw_range = range_str.split("_")[0]
                 low, high = map(float, raw_range.split("-"))
                 if low <= balance <= high:
-                    primary_risk = int(r_val)
+                    primary_risk_original = float(r_val)  # Store as float
+                    primary_risk = float(r_val)  # Keep as float, don't convert to int
                     break
-            except: continue
+            except Exception as e:
+                print(f"  └─ ⚠️  Error parsing range '{range_str}': {e}")
+                continue
 
         if primary_risk is None:
             print(f"  └─ ⚠️  No risk mapping for balance ${balance:,.2f}")
             mt5.shutdown()
             continue
 
-        print(f"  └─ 💰 Balance: ${balance:,.2f} | Target Risk: ${primary_risk}")
+        print(f"  └─ 💰 Balance: ${balance:,.2f} | Target Risk: ${primary_risk:.2f}")
 
         # Check Live Pending Orders
         pending_orders = mt5.orders_get()
@@ -422,10 +426,18 @@ def check_limit_orders_risk():
                 if sl_profit is not None:
                     order_risk_usd = round(abs(sl_profit), 2)
                     
+                    # Use a percentage-based threshold instead of absolute dollar difference
+                    # For small balances, absolute differences can be misleading
+                    risk_difference = order_risk_usd - primary_risk
+                    
+                    # For very small balances (like $2), a difference of $0.50 is significant
+                    # Use a relative threshold: 20% of primary risk or $0.50, whichever is smaller
+                    relative_threshold = max(0.50, primary_risk * 0.2)
+                    
                     # Only remove if risk is significantly higher than allowed
-                    if order_risk_usd - primary_risk > 1.0: 
+                    if risk_difference > relative_threshold: 
                         print(f"    └─ 🗑️  PURGING: {order.symbol} (#{order.ticket}) - Risk too high")
-                        print(f"       Risk: ${order_risk_usd} > Allowed: ${primary_risk}")
+                        print(f"       Risk: ${order_risk_usd:.2f} > Allowed: ${primary_risk:.2f} (Δ: ${risk_difference:.2f})")
                         
                         cancel_request = {
                             "action": mt5.TRADE_ACTION_REMOVE,
@@ -433,22 +445,23 @@ def check_limit_orders_risk():
                         }
                         result = mt5.order_send(cancel_request)
                         
-                        if result.retcode == mt5.TRADE_RETCODE_DONE:
+                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                             orders_removed += 1
                         else:
-                            print(f"       [!] Cancel failed: {result.comment}")
+                            error_msg = result.comment if result else "No response"
+                            print(f"       [!] Cancel failed: {error_msg}")
                     
-                    elif order_risk_usd < primary_risk - 1.0:
+                    elif order_risk_usd < primary_risk - relative_threshold:
                         # Lower risk - keep it (good for the account)
                         orders_kept_lower += 1
                         print(f"    └─ ✅ KEEPING: {order.symbol} (#{order.ticket}) - Lower risk than allowed")
-                        print(f"       Risk: ${order_risk_usd} < Allowed: ${primary_risk}")
+                        print(f"       Risk: ${order_risk_usd:.2f} < Allowed: ${primary_risk:.2f} (Δ: ${primary_risk - order_risk_usd:.2f})")
                     
                     else:
                         # Within tolerance - keep it
                         orders_kept_in_range += 1
                         print(f"    └─ ✅ KEEPING: {order.symbol} (#{order.ticket}) - Risk within tolerance")
-                        print(f"       Risk: ${order_risk_usd} vs Allowed: ${primary_risk}")
+                        print(f"       Risk: ${order_risk_usd:.2f} vs Allowed: ${primary_risk:.2f} (Δ: ${abs(risk_difference):.2f})")
                 else:
                     print(f"    └─ ⚠️  Could not calc risk for #{order.ticket}")
 
@@ -675,9 +688,72 @@ def place_usd_orders():
             print(f"❌ CRITICAL ERROR: Could not load normalization map: {e}")
             return None
 
-    # --- SUB-FUNCTION 2: RISK & FILE AGGREGATION ---
+    # --- SUB-FUNCTION 2: HISTORY ORDER CHECK ---
+    def check_history_order_break(symbol, max_break_hours):
+        """
+        Check if there are any closed trades for the symbol within the max_break_hours window.
+        Returns True if within break period (should skip), False if outside break period (can place).
+        """
+        if max_break_hours <= 0:
+            return False  # No break limit, always allow
+            
+        try:
+            # Get current time
+            current_time = datetime.now()
+            
+            # Calculate the cutoff time (current time - max_break_hours)
+            cutoff_time = current_time - timedelta(hours=max_break_hours)
+            
+            # Convert to timestamp for MT5
+            cutoff_timestamp = int(cutoff_time.timestamp())
+            current_timestamp = int(current_time.timestamp())
+            
+            # Get historical deals for the symbol within the time range
+            # Using DEAL_ENTRY_OUT to get closed trades only
+            history_deals = mt5.history_deals_get(cutoff_timestamp, current_timestamp, symbol=symbol)
+            
+            if not history_deals:
+                return False  # No history found, can place order
+                
+            # Filter for closed trades only (deal entries that are exits)
+            closed_trades = []
+            for deal in history_deals:
+                # Check if this is a trade exit (DEAL_ENTRY_OUT or DEAL_ENTRY_INOUT)
+                if deal.entry in [mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]:
+                    # Verify it's a complete trade (has both entry and exit)
+                    if deal.type in [mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL]:
+                        closed_trades.append(deal)
+            
+            if closed_trades:
+                # Sort by time (most recent first)
+                closed_trades.sort(key=lambda x: x.time, reverse=True)
+                most_recent = closed_trades[0]
+                
+                # Convert deal time to datetime for readable output
+                deal_time = datetime.fromtimestamp(most_recent.time)
+                hours_ago = (current_time - deal_time).total_seconds() / 3600
+                
+                print(f"      📊 History Check: Found {len(closed_trades)} closed trade(s) for {symbol}")
+                print(f"        • Most recent: {most_recent.type} at {deal_time.strftime('%Y-%m-%d %H:%M:%S')} ({hours_ago:.1f} hours ago)")
+                print(f"        • Volume: {most_recent.volume} | Profit: ${most_recent.profit:.2f}")
+                print(f"        • Break period: {max_break_hours} hours - {'WITHIN' if hours_ago <= max_break_hours else 'OUTSIDE'} break window")
+                
+                # If most recent trade is within the break period, return True (should skip)
+                return hours_ago <= max_break_hours
+            else:
+                print(f"      📊 History Check: No closed trades found for {symbol} in the last {max_break_hours} hours")
+                return False  # No closed trades, can place order
+                
+        except Exception as e:
+            print(f"      ⚠️  Error checking history for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False  # On error, allow order (fail open)
+
+    # --- SUB-FUNCTION 3: RISK & FILE AGGREGATION ---
     def collect_and_deduplicate_entries(inv_root, risk_map, balance, pull_lower, selected_rr, norm_map):
         primary_risk = None
+        primary_risk_original = None  # Store original float value
         print(f"  ⚙️  Determining primary risk for balance: ${balance:,.2f}")
         
         for range_str, r_val in risk_map.items():
@@ -685,8 +761,14 @@ def place_usd_orders():
                 raw_range = range_str.split("_")[0]
                 low, high = map(float, raw_range.split("-"))
                 if low <= balance <= high:
-                    primary_risk = int(r_val)
-                    print(f"  ✅ Balance ${balance:,.2f} in range ${low:,.0f}-${high:,.0f} → Risk Level: {primary_risk}")
+                    primary_risk_original = float(r_val)  # Store as float
+                    # For folder structure, use the original decimal format
+                    # If it's a whole number, use integer format, otherwise keep as decimal string
+                    if primary_risk_original.is_integer():
+                        primary_risk = str(int(primary_risk_original))
+                    else:
+                        primary_risk = str(primary_risk_original)  # Keep as "0.5" not "0_5"
+                    print(f"  ✅ Balance ${balance:,.2f} in range ${low:,.2f}-${high:,.2f} → Risk Level: {primary_risk_original} (Folder: {primary_risk})")
                     break
             except Exception as e:
                 print(f"  ⚠️  Error parsing risk range '{range_str}': {e}")
@@ -696,24 +778,53 @@ def place_usd_orders():
             print(f"  ❌ No matching risk range found for balance: ${balance:,.2f}")
             return None, []
 
-        risk_levels = [primary_risk]
+        # Build list of risk levels to scan
+        risk_levels = []
+        
         if pull_lower:
-            start_lookback = max(1, primary_risk - 9)
-            risk_levels = list(range(start_lookback, primary_risk + 1))
-            print(f"  📊 Pull lower enabled, scanning risk levels: {risk_levels}")
+            # Get all risk values from the risk map that are <= primary_risk_original
+            all_risk_values = []
+            for range_str, r_val in risk_map.items():
+                try:
+                    val = float(r_val)
+                    all_risk_values.append(val)
+                except:
+                    continue
+            
+            # Sort and filter risk values <= primary_risk_original
+            all_risk_values.sort()
+            risk_levels_float = [v for v in all_risk_values if v <= primary_risk_original]
+            
+            # Convert to folder name format (keep decimals, don't replace with underscores)
+            for rv in risk_levels_float:
+                if rv.is_integer():
+                    risk_levels.append(str(int(rv)))
+                else:
+                    risk_levels.append(str(rv))  # Keep as "0.5", not "0_5"
+            
+            print(f"  📊 Pull lower enabled, scanning risk levels: {risk_levels_float} → Folders: {risk_levels}")
         else:
-            print(f"  📊 Scanning only primary risk level: {risk_levels}")
+            # Just use the primary risk level
+            risk_levels = [primary_risk]
+            print(f"  📊 Scanning only primary risk level: {primary_risk_original} → Folder: {primary_risk}")
 
         unique_entries_dict = {}
         target_rr_folder = f"risk_reward_{selected_rr}"
         
-        for r_val in reversed(risk_levels):
+        for r_val in risk_levels:
+            # Use the risk value directly for folder name
             risk_folder_name = f"{r_val}usd_risk"
             risk_filename = f"{r_val}usd_risk.json"
             search_pattern = f"**/{target_rr_folder}/{risk_folder_name}/{risk_filename}"
             
             entries_found = 0
-            for path in inv_root.rglob(search_pattern):
+            files_found = list(inv_root.rglob(search_pattern))
+            
+            if files_found:
+                print(f"    📁 Searching: {search_pattern}")
+                print(f"    📁 Found {len(files_found)} file(s)")
+                
+            for path in files_found:
                 if path.is_file():
                     try:
                         with open(path, 'r') as f:
@@ -722,24 +833,28 @@ def place_usd_orders():
                                 entries_found += len(data)
                                 for entry in data:
                                     symbol = get_normalized_symbol(entry["symbol"], norm_map)
-                                    key = f"{entry.get('timeframe','NA')}|{symbol}|{entry.get('order_type','NA')}|{round(float(entry['entry']), 5)}"
-                                    if key not in unique_entries_dict:
-                                        unique_entries_dict[key] = entry
+                                    if symbol:  # Only add if symbol normalization succeeded
+                                        key = f"{entry.get('timeframe','NA')}|{symbol}|{entry.get('order_type','NA')}|{round(float(entry['entry']), 5)}"
+                                        if key not in unique_entries_dict:
+                                            unique_entries_dict[key] = entry
                     except json.JSONDecodeError as e:
-                        print(f"      ❌ Risk Level {r_val}: Invalid JSON format - {e}")
+                        print(f"      ❌ Risk Level {r_val}: Invalid JSON format in {path.name} - {e}")
                     except Exception as e:
-                        print(f"      ❌ Risk Level {r_val}: Failed to read file - {e}")
+                        print(f"      ❌ Risk Level {r_val}: Failed to read file {path.name} - {e}")
             
             if entries_found > 0:
-                print(f"    📁 Risk Level {r_val}: Found {entries_found} entries, {len([k for k in unique_entries_dict.keys() if k.startswith(f'{r_val}')])} unique after dedup")
+                print(f"    📁 Risk Level {r_val}: Found {entries_found} entries in {len(files_found)} file(s), {len(unique_entries_dict)} unique after dedup")
             else:
-                print(f"    📁 Risk Level {r_val}: No entries found")
+                if files_found:
+                    print(f"    📁 Risk Level {r_val}: No valid entries found in {len(files_found)} file(s)")
+                else:
+                    print(f"    📁 Risk Level {r_val}: No files found matching pattern")
                 
         print(f"  📈 TOTAL: {len(unique_entries_dict)} unique trading opportunities collected")
         return risk_levels, list(unique_entries_dict.values())
-
-    # --- SUB-FUNCTION 3: BROKER CLEANUP ---
-    def cleanup_unauthorized_orders(all_entries, norm_map):
+    
+    # --- SUB-FUNCTION 4: BROKER CLEANUP (with history check) ---
+    def cleanup_unauthorized_orders(all_entries, norm_map, max_break_hours):
         print("  🧹 Checking for unauthorized orders...")
         try:
             current_orders = mt5.orders_get()
@@ -748,11 +863,14 @@ def place_usd_orders():
                 return
             
             authorized_tickets = set()
+            # First, mark tickets that match our entries as authorized
             for entry in all_entries:
                 vol_key = next((k for k in entry.keys() if k.endswith("volume")), None)
                 if not vol_key: continue
                 
                 e_symbol = get_normalized_symbol(entry["symbol"], norm_map)
+                if not e_symbol: continue
+                
                 e_price = round(float(entry["entry"]), 5)
                 e_vol = round(float(entry[vol_key]), 2)
                 
@@ -762,10 +880,34 @@ def place_usd_orders():
                         round(order.volume_initial, 2) == e_vol):
                         authorized_tickets.add(order.ticket)
             
+            # Now, check if any orders should be removed due to history break
+            history_blocked_tickets = set()
+            if max_break_hours > 0:
+                print(f"  ⏰ Checking history break period ({max_break_hours} hours)...")
+                for order in current_orders:
+                    # Check if this symbol has recent history that would block it
+                    if check_history_order_break(order.symbol, max_break_hours):
+                        history_blocked_tickets.add(order.ticket)
+                        print(f"    🚫 Blocking {order.symbol} order (Ticket: {order.ticket}) due to recent history")
+            
+            # Combine unauthorized tickets (not in authorized AND in history blocked)
+            # But also remove any history blocked orders even if they're authorized
+            tickets_to_remove = set()
+            for order in current_orders:
+                # Remove if not authorized OR if history blocked
+                if order.ticket not in authorized_tickets or order.ticket in history_blocked_tickets:
+                    tickets_to_remove.add(order.ticket)
+            
             deleted_count = 0
             for order in current_orders:
-                if order.ticket not in authorized_tickets:
-                    print(f"    🗑️  Removing unauthorized order - Ticket: {order.ticket} | Symbol: {order.symbol} | Price: {order.price_open}")
+                if order.ticket in tickets_to_remove:
+                    reason = []
+                    if order.ticket not in authorized_tickets:
+                        reason.append("not in opportunity list")
+                    if order.ticket in history_blocked_tickets:
+                        reason.append("within history break period")
+                    
+                    print(f"    🗑️  Removing unauthorized order - Ticket: {order.ticket} | Symbol: {order.symbol} | Price: {order.price_open} | Reason: {', '.join(reason)}")
                     res = mt5.order_send({
                         "action": mt5.TRADE_ACTION_REMOVE,
                         "order": order.ticket
@@ -785,8 +927,8 @@ def place_usd_orders():
         except Exception as e:
             print(f"  ❌ Cleanup failed: {e}")
 
-    # --- SUB-FUNCTION 4: ORDER EXECUTION ---
-    def execute_missing_orders(all_entries, norm_map, default_magic, selected_rr, trade_allowed):
+    # --- SUB-FUNCTION 5: ORDER EXECUTION (with history check) ---
+    def execute_missing_orders(all_entries, norm_map, default_magic, selected_rr, trade_allowed, max_break_hours):
         if not trade_allowed:
             print("  ⚠️  AutoTrading is DISABLED - Orders will not be executed")
             return 0, 0, 0
@@ -834,14 +976,21 @@ def place_usd_orders():
                     failed += 1
                     continue
                 
-                # Step 5: Get volume key
+                # Step 5: HISTORY BREAK CHECK - Skip if recent history exists
+                if max_break_hours > 0:
+                    if check_history_order_break(symbol, max_break_hours):
+                        print(f"      ⏭️  SKIP: {symbol} - Recent trade history within {max_break_hours} hour break period")
+                        skipped += 1
+                        continue
+                
+                # Step 6: Get volume key
                 vol_key = next((k for k in entry.keys() if k.endswith("volume")), None)
                 if not vol_key:
                     print(f"      ❌ FAIL: {symbol_orig} - No volume field found in entry data")
                     failed += 1
                     continue
                 
-                # Step 6: Check for existing positions
+                # Step 7: Check for existing positions
                 existing_pos = mt5.positions_get(symbol=symbol) or []
                 if existing_pos:
                     pos_type = "BUY" if existing_pos[0].type == mt5.POSITION_TYPE_BUY else "SELL"
@@ -849,7 +998,7 @@ def place_usd_orders():
                     skipped += 1
                     continue
                 
-                # Step 7: Check for existing orders
+                # Step 8: Check for existing orders
                 existing_orders = mt5.orders_get(symbol=symbol) or []
                 entry_price = round(float(entry["entry"]), symbol_info.digits)
                 
@@ -865,7 +1014,7 @@ def place_usd_orders():
                     skipped += 1
                     continue
 
-                # Step 8: Calculate and validate volume
+                # Step 9: Calculate and validate volume
                 try:
                     volume = float(entry[vol_key])
                 except (ValueError, TypeError) as e:
@@ -892,7 +1041,7 @@ def place_usd_orders():
                     if volume != original_volume:
                         print(f"      📊 Volume adjusted: {original_volume:.2f} → {volume:.2f} (to match volume step {symbol_info.volume_step})")
                 
-                # Step 9: Validate prices
+                # Step 10: Validate prices
                 try:
                     entry_price = round(float(entry["entry"]), symbol_info.digits)
                     sl_price = round(float(entry["exit"]), symbol_info.digits)
@@ -909,7 +1058,7 @@ def place_usd_orders():
                     failed += 1
                     continue
                 
-                # Step 10: Determine order type
+                # Step 11: Determine order type
                 order_type = entry.get("order_type", "").lower()
                 if order_type == "buy_limit":
                     mt5_order_type = mt5.ORDER_TYPE_BUY_LIMIT
@@ -922,7 +1071,7 @@ def place_usd_orders():
                     failed += 1
                     continue
 
-                # Step 11: Prepare and send order
+                # Step 12: Prepare and send order
                 request = {
                     "action": mt5.TRADE_ACTION_PENDING,
                     "symbol": symbol,
@@ -990,7 +1139,7 @@ def place_usd_orders():
             except Exception as e:
                 print(f"      💥 UNEXPECTED ERROR: {entry.get('symbol', 'Unknown')} - {str(e)}")
                 import traceback
-                traceback.print_exc()  # This will show the full stack trace for debugging
+                traceback.print_exc()
                 failed += 1
                 
         # Summary
@@ -1054,6 +1203,7 @@ def place_usd_orders():
             # Extract settings
             settings = config.get("settings", {})
             pull_lower = settings.get("pull_orders_from_lower", False)
+            max_history_break = settings.get("max_history_order_break", 0)  # Default to 0 (disabled)
             selected_rr = config.get("selected_risk_reward", [None])[0]
             risk_map = config.get("account_balance_default_risk_management", {})
             default_magic = config.get("magic_number", 123456)
@@ -1073,6 +1223,7 @@ def place_usd_orders():
             print(f"    • Margin Level: {acc_info.margin_level:.2f}%" if acc_info.margin_level else "    • Margin Level: N/A")
             print(f"    • AutoTrading: {'✅ ENABLED' if term_info.trade_allowed else '❌ DISABLED'}")
             print(f"    • Risk/Reward: {selected_rr}")
+            print(f"    • Max History Break: {max_history_break} hours {'(DISABLED)' if max_history_break <= 0 else ''}")
 
             # Stage 1: Risk determination and file loading
             print(f"\n  📁 STAGE 1: Scanning for trading opportunities")
@@ -1081,14 +1232,14 @@ def place_usd_orders():
             )
             
             if all_entries:
-                # Stage 2: Cleanup
+                # Stage 2: Cleanup (with history check)
                 print(f"\n  🧹 STAGE 2: Order cleanup")
-                cleanup_unauthorized_orders(all_entries, norm_map)
+                cleanup_unauthorized_orders(all_entries, norm_map, max_history_break)
                 
-                # Stage 3: Execution
+                # Stage 3: Execution (with history check)
                 print(f"\n  🚀 STAGE 3: Order placement")
                 p, f, s = execute_missing_orders(
-                    all_entries, norm_map, default_magic, selected_rr, term_info.trade_allowed
+                    all_entries, norm_map, default_magic, selected_rr, term_info.trade_allowed, max_history_break
                 )
                 
                 if p > 0 or f > 0 or s > 0:
@@ -1121,7 +1272,7 @@ def place_usd_orders():
     print("="*80)
     
     return True
-    
+
 def place_orders():
     sort_orders()
     deduplicate_orders()
@@ -1131,5 +1282,5 @@ def place_orders():
 
 
 if __name__ == "__main__":
-   place_orders()
+   place_usd_orders()
 
