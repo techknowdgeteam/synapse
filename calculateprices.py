@@ -1879,5 +1879,5 @@ def calculate_orders():
 
 
 if __name__ == "__main__":
-   calculate_orders()
+   sync_dev_investors()
    
