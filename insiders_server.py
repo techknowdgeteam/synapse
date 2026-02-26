@@ -8,9 +8,9 @@ from colorama import Fore, Style, init
 # Initialize colorama for cross-platform terminal colors
 init()
 
-OUTPUT_FILE_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
-MT5_TEMPLATE_SOURCE_DIR = r"C:\xampp\htdocs\synapse\mt5\MetaTrader 5"
-BROKERS_OUTPUT_FILE_PATH = r"C:\xampp\htdocs\synapse\synarex\developersdictionary.json"
+OUTPUT_FILE_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
+MT5_TEMPLATE_SOURCE_DIR = r"C:\xampp\htdocs\chronedge\mt5\MetaTrader 5"
+BROKERS_OUTPUT_FILE_PATH = r"C:\xampp\htdocs\chronedge\synarex\developersdictionary.json"
 
 # --- HELPER FUNCTIONS ---
 
@@ -90,8 +90,8 @@ def cleanup_stale_records_in_updatedusers():
     This ensures updatedusers.json only contains accounts
     that are known to the system (past or present).
     """
-    USERSDICTIONARY_JSON = r"C:\xampp\htdocs\synapse\synarex\users.json"
-    UPDATEDUSERS_JSON    = r"C:\xampp\htdocs\synapse\synarex\updatedusers.json"
+    USERSDICTIONARY_JSON = r"C:\xampp\htdocs\chronedge\synarex\users.json"
+    UPDATEDUSERS_JSON    = r"C:\xampp\htdocs\chronedge\synarex\updatedusers.json"
 
     # --- Load fresh users.json (source of truth) ---
     if not os.path.exists(USERSDICTIONARY_JSON):
@@ -152,7 +152,7 @@ def update_table_fromupdatedusers():
     Now 100% reliable key matching + proper escaping + full field sync.
     FIX: Ensures CONTRACT_DAYS_LEFT is updated in its own column and not concatenated to 'loyalties'.
     """
-    USERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\updatedusers.json"
+    USERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\updatedusers.json"
     insiders_server_TABLE = "insiders_server"
 
     if not os.path.exists(USERS_JSON_PATH):
@@ -351,8 +351,8 @@ def fetch_insiders_server_rows():
             json_key = f"{broker_key}{user_id}"
             
             # Paths
-            base_folder = rf"C:\xampp\htdocs\synapse\synarex\usersdata\{broker_clean} {user_id}"
-            terminal_folder = rf"C:\xampp\htdocs\synapse\synarex\mt5\MetaTrader 5 {broker_clean} {user_id}"
+            base_folder = rf"C:\xampp\htdocs\chronedge\synarex\usersdata\{broker_clean} {user_id}"
+            terminal_folder = rf"C:\xampp\htdocs\chronedge\synarex\mt5\MetaTrader 5 {broker_clean} {user_id}"
             terminal_path = os.path.join(terminal_folder, "terminal64.exe")
             os.makedirs(base_folder, exist_ok=True)
             if not os.path.isdir(terminal_folder):
@@ -431,7 +431,7 @@ def fetch_insiders_server_rows():
         log_and_print("===== Export Complete =====", "TITLE")
 
 def requirements():
-    REQUIREMENTS_FILE = r"C:\xampp\htdocs\synapse\synarex\requirements.json"
+    REQUIREMENTS_FILE = r"C:\xampp\htdocs\chronedge\synarex\requirements.json"
     
     try:
         log_and_print("\n===== Fetching Requirements, Contract Duration & News =====", "TITLE")
@@ -505,7 +505,7 @@ def move_verifiedusers_to_developersdictionary():
         
         This function ONLY updates the status fields, preserving all other data in the target files.
         """
-        UPDATED_USERS_OUTPUT_FILE_PATH = r"C:\xampp\htdocs\synapse\synarex\updatedusers.json"
+        UPDATED_USERS_OUTPUT_FILE_PATH = r"C:\xampp\htdocs\chronedge\synarex\updatedusers.json"
         log_and_print("--- Starting Status Sync: usersdictionary → brokers & updatedusers ---", "TITLE")
 
         # 1. Load Source Dictionary (users.json)
@@ -673,7 +673,7 @@ def move_verifiedusers_to_developersdictionary():
         log_and_print("--- Finished Copy Verified Users to Brokers Dictionary ---", "TITLE")
 
     def update_application_status_in_database():
-        USERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+        USERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
         insiders_server_TABLE = "insiders_server"
 
         if not os.path.exists(USERS_JSON_PATH):

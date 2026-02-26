@@ -9,13 +9,13 @@ import copy
 import math
 import shutil
 
-BROKER_DICT_PATH = r"C:\xampp\htdocs\synapse\synarex\ohlc.json"
-USERS_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
-SYMBOL_CATEGORY_PATH = r"C:\xampp\htdocs\synapse\synarex\symbolscategory.json"
-DEV_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\developers"
+BROKER_DICT_PATH = r"C:\xampp\htdocs\chronedge\synarex\ohlc.json"
+USERS_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
+SYMBOL_CATEGORY_PATH = r"C:\xampp\htdocs\chronedge\synarex\symbolscategory.json"
+DEV_PATH = r"C:\xampp\htdocs\chronedge\synarex\usersdata\developers"
 
-DICTATOR_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbolscategory\symbolscategory.json"
-SYMBOLSTICK_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbolstick\symbolstick.json"
+DICTATOR_PATH = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbolscategory\symbolscategory.json"
+SYMBOLSTICK_PATH = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbolstick\symbolstick.json"
 
 def scale_orders_proportionally():
     from datetime import datetime
@@ -24,7 +24,7 @@ def scale_orders_proportionally():
     import os
     from collections import defaultdict
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -219,7 +219,7 @@ def check_risk_integrity():
     import shutil
     from collections import defaultdict
 
-    BASE_DEVELOPERS_DICT = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BASE_DEVELOPERS_DICT = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     DEVELOPERS_FUNCTIONS = os.path.join(os.path.dirname(BASE_DEVELOPERS_DICT), "developers_functions.json")
 
     if not os.path.exists(BASE_DEVELOPERS_DICT) or not os.path.exists(DEVELOPERS_FUNCTIONS):
@@ -427,7 +427,7 @@ def remove_non_allowed_symbol_orders():
     import os
     from collections import defaultdict
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -572,7 +572,7 @@ def filter_orders_by_timeframe():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
 
@@ -769,7 +769,7 @@ def remove_disabled_orders():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -935,9 +935,9 @@ def calculate_forex_sl_tp_market_old():
     import os
 
     # --- Path Configurations ---
-    USERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
-    DEV_BASE_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\developers"
-    SYMBOL_CATEGORY_PATH = r"C:\xampp\htdocs\synapse\synarex\symbolscategory.json"
+    USERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
+    DEV_BASE_PATH = r"C:\xampp\htdocs\chronedge\synarex\usersdata\developers"
+    SYMBOL_CATEGORY_PATH = r"C:\xampp\htdocs\chronedge\synarex\symbolscategory.json"
 
     # Load Required Base Files
     if not all(os.path.exists(p) for p in [USERS_JSON_PATH, SYMBOL_CATEGORY_PATH]):
@@ -1088,7 +1088,7 @@ def calculate_basketindices_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -1448,7 +1448,7 @@ def calculate_synthetics_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -1808,7 +1808,7 @@ def calculate_energies_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -2162,7 +2162,7 @@ def calculate_indices_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -2499,7 +2499,7 @@ def calculate_metals_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -2851,7 +2851,7 @@ def calculate_crypto_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     
@@ -3205,7 +3205,7 @@ def calculate_equities_sl_tp_market():
     import json
     import os
 
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\users.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\users.json"
     brokers_dir = os.path.dirname(BROKERS_JSON_PATH)
     developers_functions_path = os.path.join(brokers_dir, "developers_functions.json")
     

@@ -3,7 +3,7 @@
     "LOGIN_ID": "101347351",
     "PASSWORD": "@Techknowdge12#",
     "SERVER": "DerivSVG-Server-02",
-    "BASE_FOLDER": "C:\\xampp\\htdocs\\synapse\\synarex\\usersdata\\ohlc",
+    "BASE_FOLDER": "C:\\xampp\\htdocs\\chronedge\\synarex\\usersdata\\ohlc",
     "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Deriv 6\\terminal64.exe"
   }
 }

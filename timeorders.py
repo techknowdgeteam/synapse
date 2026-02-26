@@ -20,7 +20,7 @@ def update_calendar():
     print(f"Current date and time: {current_date.strftime('%d/%m/%Y')} {current_time_12hour} ({current_time_24hour})")
     
     # Read timeauthor.json (only need 'type')
-    pageauthors_path = r"C:\xampp\htdocs\synapse\synarex\timeauthor.json"
+    pageauthors_path = r"C:\xampp\htdocs\chronedge\synarex\timeauthor.json"
     print(f"Reading timeauthor.json from {pageauthors_path}")
     try:
         with open(pageauthors_path, 'r') as f:
@@ -39,7 +39,7 @@ def update_calendar():
     print(f"Type: {type_value}")
     
     # Read timeorders.json
-    timeorders_path = r"C:\xampp\htdocs\synapse\synarex\timeorders.json"
+    timeorders_path = r"C:\xampp\htdocs\chronedge\synarex\timeorders.json"
     print(f"Reading timeorders.json from {timeorders_path}")
     try:
         with open(timeorders_path, 'r') as f:
@@ -176,10 +176,10 @@ def update_calendar():
 
 def deletejson():
     """
-    Deletes the file: C:\\xampp\\htdocs\\synapse\\fullordersschedules.json
+    Deletes the file: C:\\xampp\\htdocs\\chronedge\\fullordersschedules.json
     Returns True if deleted successfully, False otherwise.
     """
-    file_path = r"C:\xampp\htdocs\synapse\synarex\fullordersschedules.json"
+    file_path = r"C:\xampp\htdocs\chronedge\synarex\fullordersschedules.json"
     
     try:
         if os.path.exists(file_path):
@@ -214,7 +214,7 @@ def update_timeschedule():
     print(f"Current date and time: {current_date} {current_time_12hour} ({current_time_24hour})")
     
     # Read timeauthor.json to get type only
-    pageauthors_path = r"C:\xampp\htdocs\synapse\synarex\timeauthor.json"
+    pageauthors_path = r"C:\xampp\htdocs\chronedge\synarex\timeauthor.json"
     print(f"Reading timeauthor.json from {pageauthors_path}")
     try:
         with open(pageauthors_path, 'r') as f:
@@ -269,7 +269,7 @@ def update_timeschedule():
             print("schedules.json is corrupted, ignoring")
     
     # Read timeorders.json
-    timeorders_path = r"C:\xampp\htdocs\synapse\synarex\timeorders.json"
+    timeorders_path = r"C:\xampp\htdocs\chronedge\synarex\timeorders.json"
     print(f"Reading timeorders.json from {timeorders_path}")
     try:
         with open(timeorders_path, 'r') as f:
@@ -431,7 +431,7 @@ def current_time():
     # --- Check if we need to refresh the calendar because next_schedule is outdated ---
     
     # First get the current 'type' from timeauthor.json
-    pageauthors_path = r"C:\xampp\htdocs\synapse\synarex\timeauthor.json"
+    pageauthors_path = r"C:\xampp\htdocs\chronedge\synarex\timeauthor.json"
     type_value = None
     try:
         with open(pageauthors_path, 'r') as f:

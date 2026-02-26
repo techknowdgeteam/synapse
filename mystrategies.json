@@ -1,0 +1,342 @@
+{
+        "chart":{
+        "define_candles": {
+            "entries_poi_condition": {
+                "apprehend_higherhighsandlowerlows":{
+                    "entry_1": {
+                        "new_filename": "key_level",
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_identical",
+                                "condition": "behind_define_1"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_identical",
+                                "condition": "behind_define_2"
+                            },
+                            "define_4": {
+                                "type": "define_3_type_opposite",
+                                "condition": "behind_define_1"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_3",
+                            "subject_is_higherhigh_or_lowerhigh":"low_price",
+                            "subject_is_lowerlow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_2, define_3",
+                            "restrict_swing_mitigation_between_definitions":"define_1_define_2, define_1_define_3, define_2_define_3",
+                            "multiple_selection":"define_3_non_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
+                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"low_price",
+                                "subject_is_lowerlow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"define_4",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_2": {
+                        "new_filename": "structural_liquidity",
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": 4
+                            },
+                            "define_4": {
+                                "type": "define_3_type_opposite",
+                                "condition": "beyond_define_2",
+                                "minimum_collectivebeyondcandles": null
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_1"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_5",
+                            "subject_is_higherhigh_or_lowerhigh":"low_price",
+                            "subject_is_lowerlow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_5",
+                            "restrict_swing_mitigation_between_definitions":"define_4_define_5",
+                            "multiple_selection":"define_5_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
+                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"low_price",
+                                "subject_is_lowerlow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_3",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            }
+                        }
+                    }
+                },
+                "apprehend_higherhighsandlowerlows_2":{
+                    "entry_1": {
+                        "new_filename": "DOUBLE-LEVELS",
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_identical",
+                                "condition": "behind_define_1"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_2",
+                            "subject_is_higherhigh_or_lowerhigh":"low_price",
+                            "subject_is_lowerlow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_2, define_3",
+                            "restrict_swing_mitigation_between_definitions":"define_1_define_2",
+                            "multiple_selection":"define_3_non_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
+                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"low_price",
+                                "subject_is_lowerlow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            }
+                        }
+                    }
+                }
+            },
+            "liquidity_candle": {
+                "apprehend_higherhighsandlowerlows":{
+                    "number_candles":"define_candle",
+                        "liquidity_apprentice_candle":{
+                            "swing_types":{
+                                "swing_type_lower_low":"low_price",
+                                "swing_type_lower_low_text":"",
+                                "swing_type_higher_high":"high_price",
+                                "swing_type_higher_high_text":"",                    
+                                "label_at": {
+                                    "swing_type_lower_low_marker": "",
+                                    "swing_type_higher_high_marker": ""
+                                }
+                            }
+                        },
+                        "liquidity_sweeper_candle":{                   
+                            "label_at": {
+                                "lower_low_liquidity_candle_marker": "",
+                                "higher_high_liquidity_candle_marker": "",
+                                "lower_low_liquidity_candle_text": "",
+                                "higher_high_liquidity_candle_text": ""
+                            }
+                        }
+                },
+                "apprehend_higherhighsandlowerlows_2":{
+                    "number_candles":"define_candle",
+                        "liquidity_apprentice_candle":{
+                            "swing_types":{
+                                "swing_type_lower_low":"low_price",
+                                "swing_type_lower_low_text":"",
+                                "swing_type_higher_high":"high_price",
+                                "swing_type_higher_high_text":"",                    
+                                "label_at": {
+                                    "swing_type_lower_low_marker": "",
+                                    "swing_type_higher_high_marker": ""
+                                }
+                            }
+                        },
+                        "liquidity_sweeper_candle":{                   
+                            "label_at": {
+                                "lower_low_liquidity_candle_marker": "",
+                                "higher_high_liquidity_candle_marker": "",
+                                "lower_low_liquidity_candle_text": "",
+                                "higher_high_liquidity_candle_text": ""
+                            }
+                        }
+                }
+            },
+            "higherhighsandlowerlows_2": {
+                "BARS": 301,
+                "filename":"parentswing.json",
+                "read_candles_from":"new_old",
+                "number_candles":"define_candle",
+                "timeframes_relation":"default",
+                "NEIGHBOR_LEFT": 14,
+                "NEIGHBOR_RIGHT": 1,
+                "label":{
+                    "higherhighs_text": "HH",
+                    "lowerlows_text": "LL",
+                    "directional_bias_text": "",
+                    "label_at": {
+                        "lower_lows":"low",
+                        "lower_lows_color":"green",
+                        "lower_lows_marker": "doublearrows",
+                        "lower_lows_contourmaker_marker": "",
+                        "lower_lows_directional_bias_marker": "",
+                        "higher_highs":"high",
+                        "higher_highs_color":"red",
+                        "higher_highs_marker": "doublearrows"
+                    }
+                }
+            },
+            "higherhighsandlowerlows": {
+                "BARS": 301,
+                "filename":"parentswing.json",
+                "read_candles_from":"new_old",
+                "number_candles":"define_candle",
+                "timeframes_relation":"default",
+                "NEIGHBOR_LEFT": 14,
+                "NEIGHBOR_RIGHT": 14,
+                "label":{
+                    "higherhighs_text": "HH",
+                    "lowerlows_text": "LL",
+                    "directional_bias_text": "",
+                    "label_at": {
+                        "lower_lows":"low",
+                        "lower_lows_color":"green",
+                        "lower_lows_marker": "doublearrows",
+                        "lower_lows_contourmaker_marker": "",
+                        "lower_lows_directional_bias_marker": "",
+                        "higher_highs":"high",
+                        "higher_highs_color":"red",
+                        "higher_highs_marker": "doublearrows"
+                    }
+                }
+            },
+            "fvg": {
+                "filename":"fvg.json",
+                "BARS": 301,
+                "NEIGHBOR_LEFT": 14,
+                "NEIGHBOR_RIGHT": 14,
+                "read_candles_from":"new_old",
+                "number_candles":"define_candle",
+                "condition":{
+                    "c1_lookback": null,
+                    "strong_c1": "greater",
+                    "strong_fvg": "tallest_body",
+                    "fvg_body_size": "multiply_c3_height_by_2",
+                    "strong_c3": "greater",
+                    "c1_candle_type": "none",
+                    "c3_candle_type": "same_with_fvg",
+                    "c3_closing": "beyond_close",
+                    "c1_c3_higher_body_than_wicks": "none"
+                },
+                "validate_my_condition": true,
+                "label":{
+                    "bullish_text": "",
+                    "bearish_text": "",
+                    "label_at": {
+                        "bullish":"low",
+                        "bullish_color":"green",
+                        "bullish_marker": "arrow",
+                        "bearish":"high",
+                        "bearish_color":"red",
+                        "bearish_marker": "arrow"
+                    }
+                }
+            },
+            "directional_bias_candles": {
+                "apprehend_": {
+                    "target":"contourmaker",          
+                    "label":{
+                        "directional_bias_candles_text": "",
+                        "label_at": {
+                            "upward_directional_bias": "high",
+                            "downward_directional_bias": "high",
+                            "upward_directional_bias_marker": "dot",
+                            "downward_directional_bias_marker": "dot"
+                        }
+                    }
+                },
+                "apprehend_(directional_bias_candles)": {       
+                    "label":{
+                        "directional_bias_candles_text": "",
+                        "label_at": {
+                            "upward_directional_bias": "high",
+                            "downward_directional_bias": "high",
+                            "upward_directional_bias_marker": "pentagon",
+                            "downward_directional_bias_marker": "pentagon"
+                        }
+                    }
+                }
+            },
+            "timeframes_communication": {
+                "apprehend_": {
+                    "number_candles":"define_candle",
+                    "timeframe_sender":"4h, 1h",
+                    "timeframe_receiver":"15m, 5m",
+                    "target":"contourmaker, directional_bias, next_bias",          
+                    "label":{
+                        "directional_bias_candles_text": "",
+                        "label_at": {
+                            "upward_directional_bias": "high",
+                            "downward_directional_bias": "high",
+                            "upward_directional_bias_marker": "dot",
+                            "downward_directional_bias_marker": "dot"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

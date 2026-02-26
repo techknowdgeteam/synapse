@@ -824,7 +824,7 @@ def place_orders_hedging_demo():
 def place_usd_orders_for_demo_accounts():
     """
     Process USD orders for DEMO accounts with enhanced visualization and logging.
-    Maintains the exact demo account initialization logic while improving aesthetics.
+    Modified to place orders from TARGET risk DOWN to lower risk (descending order).
     """
     # --- SUB-FUNCTION 1: DATA INITIALIZATION ---
     def load_normalization_map():
@@ -841,7 +841,7 @@ def place_usd_orders_for_demo_accounts():
 
     # --- SUB-FUNCTION 2: RISK & FILE AGGREGATION ---
     def collect_entries(inv_root, risk_map, balance, pull_lower, selected_rr, norm_map):
-        """Collect trading entries from risk folders (NO DEDUPLICATION) - FIXED FOLDER HANDLING"""
+        """Collect trading entries from risk folders with DESCENDING order when pull_lower is enabled"""
         primary_risk = None
         primary_risk_original = None  # Store original float value
         print(f"  ⚙️  Determining primary risk for balance: ${balance:,.2f}")
@@ -885,6 +885,9 @@ def place_usd_orders_for_demo_accounts():
             all_risk_values.sort()
             risk_levels_float = [v for v in all_risk_values if v <= primary_risk_original]
             
+            # REVERSE THE ORDER for descending (highest to lowest)
+            risk_levels_float.reverse()
+            
             # Convert to folder name format (keep decimals, don't replace with underscores)
             for rv in risk_levels_float:
                 if rv.is_integer():
@@ -892,7 +895,7 @@ def place_usd_orders_for_demo_accounts():
                 else:
                     risk_levels.append(str(rv))  # Keep as "0.5", not "0_5"
             
-            print(f"  📊 Pull lower enabled, scanning risk levels: {risk_levels_float} → Folders: {risk_levels}")
+            print(f"  📊 Pull lower enabled (DESCENDING order), scanning risk levels: {risk_levels_float} → Folders: {risk_levels}")
         else:
             # Just use the primary risk level
             risk_levels = [primary_risk]
@@ -901,8 +904,8 @@ def place_usd_orders_for_demo_accounts():
         all_entries = []  # Simple list, no deduplication
         target_rr_folder = f"risk_reward_{selected_rr}"
         
-        # Scan each risk level
-        for r_val in risk_levels:  # No reversed() to maintain order
+        # Scan each risk level in the order specified (now descending when pull_lower=True)
+        for r_val in risk_levels:
             # Use the risk value directly for folder name
             risk_folder_name = f"{r_val}usd_risk"
             risk_filename = f"{r_val}usd_risk.json"
@@ -937,7 +940,7 @@ def place_usd_orders_for_demo_accounts():
                 else:
                     print(f"    📁 Risk Level {r_val}: No files found matching pattern")
                 
-        print(f"  📈 TOTAL: {len(all_entries)} trading opportunities collected (no deduplication)")
+        print(f"  📈 TOTAL: {len(all_entries)} trading opportunities collected (no deduplication) - PROCESSING ORDER: {' → '.join(risk_levels)}")
         return risk_levels, all_entries
 
     # --- SUB-FUNCTION 3: BROKER CLEANUP ---
@@ -992,7 +995,6 @@ def place_usd_orders_for_demo_accounts():
 
     # --- SUB-FUNCTION 4: ORDER EXECUTION ---
     def execute_missing_orders(all_entries, norm_map, default_magic, selected_rr, trade_allowed):
-        
         """Place missing orders with comprehensive validation and detailed error mapping"""
         if not trade_allowed:
             print("  ⚠️  AutoTrading is DISABLED - Orders will not be executed")
@@ -1197,7 +1199,7 @@ def place_usd_orders_for_demo_accounts():
             except Exception as e:
                 print(f"      💥 UNEXPECTED ERROR: {entry.get('symbol', 'Unknown')} - {str(e)}")
                 import traceback
-                traceback.print_exc()  # This will show the full stack trace for debugging
+                traceback.print_exc()
                 failed += 1
                 
         # Summary
@@ -1208,11 +1210,12 @@ def place_usd_orders_for_demo_accounts():
 
     # --- MAIN EXECUTION FLOW ---
     print("\n" + "="*80)
-    print("🎯 DEMO ACCOUNT USD ORDER PLACEMENT ENGINE")
+    print("🎯 DEMO ACCOUNT USD ORDER PLACEMENT ENGINE (DESCENDING ORDER MODE)")
     print("="*80)
     print("📌 Using DEMO account initialization logic")
     print("📌 Deduplication stage: REMOVED")
     print("📌 Comprehensive error mapping: ENABLED")
+    print("📌 ORDER PLACEMENT: TARGET risk → LOWER risk (descending)")
     print("="*80)
     
     # Load normalization map
@@ -1294,6 +1297,8 @@ def place_usd_orders_for_demo_accounts():
             print(f"    • AutoTrading: {'✅ ENABLED' if term_info.trade_allowed else '❌ DISABLED'}")
             print(f"    • Risk/Reward: {selected_rr}")
             print(f"    • Account Type: DEMO")
+            if pull_lower:
+                print(f"    • Order Mode: DESCENDING (Target → Lower)")
 
             # Stage 1: Risk determination and file loading (NO DEDUPLICATION)
             print(f"\n  📁 STAGE 1: Scanning for trading opportunities")
@@ -1337,7 +1342,7 @@ def place_usd_orders_for_demo_accounts():
     mt5.shutdown()
     
     print("\n" + "="*80)
-    print("✅ DEMO ORDER PLACEMENT COMPLETED")
+    print("✅ DEMO ORDER PLACEMENT COMPLETED (DESCENDING ORDER MODE)")
     print(f"   Processed: {processed}/{total_investors} DEMO investors")
     print(f"   Successful: {successful} DEMO investors")
     print("="*80)
@@ -1609,7 +1614,7 @@ def cleanup_history_duplicates_demo():
             if deal.entry in [mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]:
                 # Extract first 3 significant digits of the price
                 # We remove the decimal to handle 0.856 and 1901 uniformly
-                clean_price = str(deal.price).replace('.', '')[:3]
+                clean_price = str(deal.price).replace('.', '')[:4]
                 used_entries.add((deal.symbol, clean_price))
 
         if not used_entries:
@@ -2588,7 +2593,7 @@ def place_grid_trades_demo():
 
 def place_orders():
     sort_orders()
-    deduplicate_orders()
+    deduplicate_orders() 
     default_price_repair()
     filter_unauthorized_symbols()
     place_usd_orders_for_demo_accounts()
@@ -2598,5 +2603,5 @@ def place_orders():
     check_limit_orders_risk_demo()
 
 if __name__ == "__main__":
-   place_grid_trades_demo()
+   place_orders()
 

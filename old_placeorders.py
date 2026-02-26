@@ -11,7 +11,7 @@ def _0_50_4_orders():
         FILTER: Delete any order with live_risk_usd > 0.60 from BOTH files
         """
 
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -204,7 +204,7 @@ def _0_50_4_orders():
     def place_0_50cent_usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_0_50cent_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -453,7 +453,7 @@ def _0_50_4_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 0.60
         LOOKBACK_DAYS = 5
@@ -969,7 +969,7 @@ def _0_50_4_orders():
 
 def _4_8_orders():
     def _1usd_live_sl_tp_amounts():
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -1162,7 +1162,7 @@ def _4_8_orders():
     def place_1usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_1_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -1399,7 +1399,7 @@ def _4_8_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 1.10
         LOOKBACK_DAYS = 5
@@ -1926,7 +1926,7 @@ def _8_12_orders():
         FILTER: Delete any order with live_risk_usd > 2.10 from BOTH files
         """
 
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -2119,7 +2119,7 @@ def _8_12_orders():
     def place_2usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_2_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -2353,7 +2353,7 @@ def _8_12_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 2.10
         LOOKBACK_DAYS = 5
@@ -2880,7 +2880,7 @@ def _12_20_orders():
         FILTER: Delete any order with live_risk_usd > 3.10 from BOTH files
         """
 
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -3073,7 +3073,7 @@ def _12_20_orders():
     def place_3usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_3_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -3311,7 +3311,7 @@ def _12_20_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 3.10
         LOOKBACK_DAYS = 5
@@ -3838,7 +3838,7 @@ def _20_80_orders():
         FILTER: Delete any order with live_risk_usd > 4.10 from BOTH files
         """
 
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -4031,7 +4031,7 @@ def _20_80_orders():
     def place_4usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_4_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -4267,7 +4267,7 @@ def _20_80_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 4.10
         LOOKBACK_DAYS = 5
@@ -4794,7 +4794,7 @@ def _80_160_orders():
         FILTER: Delete any order with live_risk_usd > 8.10 from BOTH files
         """
 
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -4987,7 +4987,7 @@ def _80_160_orders():
     def place_8usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_8_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -5223,7 +5223,7 @@ def _80_160_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 8.10
         LOOKBACK_DAYS = 5
@@ -5751,7 +5751,7 @@ def _160_320_orders():
         FILTER: Delete any order with live_risk_usd > 16.10 from BOTH files
         """
 
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         INPUT_FILE = "hightolow.json"
         OUTPUT_FILE = "live_risk_profit_all.json"
 
@@ -5944,7 +5944,7 @@ def _160_320_orders():
     def place_16usd_orders():
         
 
-        BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         RISK_FOLDER = "risk_16_usd"
         STRATEGY_FILE = "hightolow.json"
         REPORT_SUFFIX = "forex_order_report.json"
@@ -6180,7 +6180,7 @@ def _160_320_orders():
         - Shows duplicate market name on its own line
         ONLY PROCESSES ACCOUNTS WITH BALANCE $12.00 – $19.99
         """
-        BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+        BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
         REPORT_NAME = "pending_risk_profit_per_order.json"
         MAX_RISK_USD = 16.10
         LOOKBACK_DAYS = 5
@@ -6702,8 +6702,8 @@ def restore_missing_orders():
     import pytz
 
     TZ = pytz.timezone("Africa/Lagos")
-    BROKERS_ORDERS_PATH = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_volumes_points\allowedmarkets\brokerslimitorders.json")
-    CALC_BASE_DIR = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices")
+    BROKERS_ORDERS_PATH = Path(r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_volumes_points\allowedmarkets\brokerslimitorders.json")
+    CALC_BASE_DIR = Path(r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices")
 
     RISK_MAP = {
         0.5: "risk_0_50cent_usd",
@@ -6884,7 +6884,7 @@ def restore_missing_orders():
     return True 
   
 def collect_all_brokers_limit_orders():
-    BASE_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_volumes_points\allowedmarkets"
+    BASE_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_volumes_points\allowedmarkets"
     REPORT_NAME = "brokerslimitorders.json"
     TZ = pytz.timezone("Africa/Lagos")
     OUTPUT_PATH = Path(BASE_DIR) / REPORT_NAME
@@ -7282,7 +7282,7 @@ def deduplicate_pending_orders():
       5. When multiple pendings exist → use STRATEGY (lowtohigh/hightolow) to keep best price
          or keep oldest (lowest ticket) if no strategy.
     """
-    BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+    BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
     DEDUP_REPORT = "dedup_report.json"
     ISSUES_FILE = "ordersissues.json"
 
@@ -7505,7 +7505,7 @@ def BreakevenRunningPositions():
       • Ratio 2 → SL to 0.50 (actual price shown)
     Clean logs, full precision, MT5-safe.
     """
-    BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+    BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
     BREAKEVEN_REPORT = "breakeven_report.json"
     ISSUES_FILE = "ordersissues.json"
 
@@ -8252,7 +8252,7 @@ def martingale_enforcement():
     return True
 
 def place_2usd_orders():
-    BASE_INPUT_DIR = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+    BASE_INPUT_DIR = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
     RISK_FOLDER = "risk_2_usd"
     STRATEGY_FILE = "hightolow.json"
     REPORT_SUFFIX = "forex_order_report.json"
@@ -8524,12 +8524,12 @@ def purge_non_allowed_orders():
     import MetaTrader5 as mt5
     import pytz
 
-    BASE_DIR = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices")
+    BASE_DIR = Path(r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices")
     NON_ALLOWED_OUT = BASE_DIR / "nonallowedorders.json"
 
-    ALLOWED_MARKETS_PATH = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_volumes_points\allowedmarkets\allowedmarkets.json")
-    ALL_SYMBOLS_PATH      = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_volumes_points\allowedmarkets\allsymbolsvolumesandrisk.json")
-    SYMBOL_MATCH_PATH     = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_volumes_points\allowedmarkets\symbolsmatch.json")
+    ALLOWED_MARKETS_PATH = Path(r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_volumes_points\allowedmarkets\allowedmarkets.json")
+    ALL_SYMBOLS_PATH      = Path(r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_volumes_points\allowedmarkets\allsymbolsvolumesandrisk.json")
+    SYMBOL_MATCH_PATH     = Path(r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_volumes_points\allowedmarkets\symbolsmatch.json")
 
     print("[PURGE] Starting detection + REMOVAL of non-allowed orders (JSON + LIVE PENDING)...")
 
@@ -8768,7 +8768,7 @@ def purge_non_allowed_orders():
     return total_removed == 0
 
 def print_user_brokerids():
-    base_path = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices"
+    base_path = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbols_calculated_prices"
     
     if not os.path.exists(base_path):
         print(f"ERROR: Base directory does not exist:\n    {base_path}")

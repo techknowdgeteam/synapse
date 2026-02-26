@@ -29,7 +29,7 @@ import multiprocessing
 
 
 def load_developers_dictionary():
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\ohlc.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\ohlc.json"
     """Load brokers config from JSON file with error handling and fallback."""
     if not os.path.exists(BROKERS_JSON_PATH):
         print(f"CRITICAL: {BROKERS_JSON_PATH} NOT FOUND! Using empty config.", "CRITICAL")
@@ -57,9 +57,13 @@ def load_developers_dictionary():
 ohlcdictionary = load_developers_dictionary()
 
 
-BASE_ERROR_FOLDER = r"C:\xampp\htdocs\synapse\synarex\usersdata\debugs"
+BASE_ERROR_FOLDER = r"C:\xampp\htdocs\chronedge\synarex\usersdata\debugs"
 TIMEFRAME_MAP = {
-    "1m": mt5.TIMEFRAME_M1
+    "5m": mt5.TIMEFRAME_M5,
+    "15m": mt5.TIMEFRAME_M15,
+    "30m": mt5.TIMEFRAME_M30,
+    "1h": mt5.TIMEFRAME_H1,
+    "4h": mt5.TIMEFRAME_H4
 }
 ERROR_JSON_PATH = os.path.join(BASE_ERROR_FOLDER, "chart_errors.json")
            
@@ -559,7 +563,7 @@ def ticks_value(symbol, symbol_folder, user_brokerid, base_folder, all_symbols):
     output_json_path = os.path.join(symbol_folder, output_json_filename)
     
     # Combined file path
-    combined_path = r"C:\xampp\htdocs\synapse\synarex\usersdata\symbolstick\symbolstick.json"
+    combined_path = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbolstick\symbolstick.json"
     
     # Default values
     tick_size = None
@@ -709,8 +713,8 @@ def crop_chart(chart_path, symbol, timeframe_str, timeframe_folder):
     return error_log
 
 def backup_developers_dictionary():
-    main_path = Path(r"C:\xampp\htdocs\synapse\synarex\ohlc.json")
-    backup_path = Path(r"C:\xampp\htdocs\synapse\synarex\ohlcbackup.json")
+    main_path = Path(r"C:\xampp\htdocs\chronedge\synarex\ohlc.json")
+    backup_path = Path(r"C:\xampp\htdocs\chronedge\synarex\ohlcbackup.json")
     
     main_path.parent.mkdir(parents=True, exist_ok=True)
     backup_path.parent.mkdir(parents=True, exist_ok=True)
@@ -823,7 +827,7 @@ def clear_chart_folder(base_folder: str):
     return True, error_log
 
 def clear_unknown_broker():
-    base_path = r"C:\xampp\htdocs\synapse\synarex\usersdata"
+    base_path = r"C:\xampp\htdocs\chronedge\synarex\usersdata"
     
     if not os.path.exists(base_path):
         print(f"ERROR: Base directory does not exist:\n    {base_path}")
@@ -1076,7 +1080,7 @@ def fetch_charts_all_brokers(bars):
             mt5.shutdown()
         except:
             pass
-        
+ 
 def main():
     success = fetch_charts_all_brokers(
         bars=2001
@@ -1085,10 +1089,11 @@ def main():
     if success:
         log_and_print("Chart generation, cropping, arrow detection, PH/PL analysis, and candle data saving completed successfully for all brokers!", "SUCCESS")
     else:
-        log_and_print("Process failed. Check error log for details.", "ERROR")
+        log_and_print("Process failed. Check error log for details.", "ERROR")   
 
 if __name__ == "__main__":
     main()
+    
 
 
         

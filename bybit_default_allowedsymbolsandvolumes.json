@@ -1,0 +1,873 @@
+{
+  "forex": [
+    {
+      "symbol": "AUDNZD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.8
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      }
+    },
+    {
+      "symbol": "AUDCAD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.8
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      }
+    },
+    {
+      "symbol": "AUDCHF",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.6
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      }
+    },
+    {
+      "symbol": "AUDJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.60
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.80
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      }
+    },
+    {
+      "symbol": "AUDUSD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.80
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.8
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 6
+      }
+    },
+    {
+      "symbol": "CADCHF",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.30
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      }
+    },
+    {
+      "symbol": "CADJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.70
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2.5
+      }
+    },
+    {
+      "symbol": "CHFJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.50
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.6
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5.5
+      }
+    },
+    {
+      "symbol": "EURAUD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.7
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.50
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.8
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 7
+      }
+    },
+    {
+      "symbol": "EURCAD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.25
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.40
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.50
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2.5
+      }
+    },
+    {
+      "symbol": "EURGBP",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.40
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.6
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.7
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.80
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      }
+    },
+    {
+      "symbol": "EURJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.60
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.80
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5
+      }
+    },
+    {
+      "symbol": "EURNZD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.6
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      }
+    },
+    {
+      "symbol": "EURUSD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.30
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.50
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.2
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2.5
+      }
+    },
+    {
+      "symbol": "GBPCAD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.60
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.2
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4.5
+      }
+    },
+    {
+      "symbol": "GBPCHF",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.60
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.2
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5
+      }
+    },
+    {
+      "symbol": "GBPJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.7
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.8
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5
+      }
+    },
+    {
+      "symbol": "GBPNZD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.90
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.10
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.30
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5
+      }
+    },
+    {
+      "symbol": "GBPUSD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.40
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.50
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.70
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      }
+    },
+    {
+      "symbol": "NZDCAD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.30
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.35
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.40
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      }
+    },
+    {
+      "symbol": "NZDJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.50
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.1
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2.5
+      }
+    },
+    {
+      "symbol": "NZDUSD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.50
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.8
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      }
+    },
+    {
+      "symbol": "USDCAD",
+      "5m_specs": {
+        "volume": 0.02,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.30
+      },
+      "15m_specs": {
+        "volume": 0.02,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.40
+      },
+      "30m_specs": {
+        "volume": 0.02,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.50
+      },
+      "1h_specs": {
+        "volume": 0.02,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.50
+      },
+      "4h_specs": {
+        "volume": 0.02,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      }
+    },
+    {
+      "symbol": "USDCHF",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.90
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.50
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.7
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3.5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      }
+    },
+    {
+      "symbol": "USDJPY",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.7
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.2
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      }
+    },
+    {
+      "symbol": "GBPAUD",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.7
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 2.2
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 3.40
+      }
+    }
+  ],
+  "synthetics": [],
+  "basket_indices": [],
+  "indices": [
+    {
+      "symbol": "Dj30",
+      "5m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4
+      },
+      "15m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 4.5
+      },
+      "30m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 6
+      },
+      "45m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 17
+      },
+      "1h_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 17
+      },
+      "4h_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 20
+      }
+    },
+    {
+      "symbol": "NAS100",
+      "5m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5.0
+      },
+      "15m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 8
+      },
+      "30m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 10.00
+      },
+      "45m_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 12.00
+      },
+      "1h_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 15
+      },
+      "4h_specs": {
+        "volume": 0.1,
+        "enforce_usd_risk": "no",
+        "usd_risk": 20
+      }
+    }
+  ],
+  "metals": [
+    {
+      "symbol": "xauusd",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 8
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 15
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 16
+      },
+      "45m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 18
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 30
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 50.00
+      }
+    }
+  ],
+  "equities": [],
+  "energies": [
+    {
+      "symbol": "us oil",
+      "5m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 0.80
+      },
+      "15m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "30m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.8
+      },
+      "45m_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 1.5
+      },
+      "1h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 5
+      },
+      "4h_specs": {
+        "volume": 0.01,
+        "enforce_usd_risk": "no",
+        "usd_risk": 8
+      }
+    }
+  ]
+}
