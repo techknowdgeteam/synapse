@@ -7464,1139 +7464,6 @@ def timeframe_countdown(inv_id=None):
     print(f"\n{'='*10} 🏁 FUNCTION ENDED {'='*10}\n")
     return stats
 
-def place_signals_orders_accoun(inv_id=None):
-    """
-    Place orders from signals.json for specified investor(s).
-    
-    EXECUTION LOGIC:
-    1. Check accountmanagement.json settings:
-       - If enable_auto_trading is false, skip order placement
-       - Check allow_order_type_conversion for conversion permission
-    
-    2. For each symbol with signals:
-       - Process ALL orders from both bid_orders and ask_orders arrays
-       - For each order, check if an identical order already exists in:
-         * Pending orders (same symbol, order_type, entry price, volume)
-         * Open positions (same symbol, order_type, entry price, volume)
-       - Skip if identical order exists
-       
-    3. NEW: Check if order is too close to any running position using risk-based detection:
-       - Get all open positions for the symbol
-       - For each position, calculate the risk if the pending order were to be triggered
-       - Compare this risk against the position's own risk
-       - If calculated risk < position risk, orders are too close - SKIP placement
-       - If calculated risk >= position risk, orders are sufficiently far - ALLOW placement
-       
-    4. Place new order if no duplicate found and not too close to positions
-       - If order has order_counter, also place the counter order IMMEDIATELY
-       - Pending orders are placed with TRADE_ACTION_PENDING and will auto-execute when price reaches them
-       - If order fails with "Invalid price" (code 10015) AND conversion is allowed:
-         * Convert order type with adjusted price
-    
-    5. Track placement statistics
-    
-    Args:
-        inv_id: Optional specific investor ID to process
-        
-    Returns:
-        dict: Statistics about order placement
-    """
-    print(f"\n{'='*10} 🎯 PLACE SIGNALS ORDERS {'='*10}")
-    if inv_id:
-        print(f" Processing single investor: {inv_id}")
-    
-    # Statistics for this run
-    stats = {
-        "investor_id": inv_id if inv_id else "all",
-        "investors_processed": 0,
-        "investors_skipped_due_to_settings": 0,
-        "symbols_processed": 0,
-        "orders_attempted": 0,
-        "orders_placed": 0,
-        "orders_skipped_duplicate_pending": 0,
-        "orders_skipped_duplicate_position": 0,
-        "orders_skipped_too_close_to_position": 0,
-        "orders_failed": 0,
-        "orders_converted_and_placed": 0,
-        "orders_conversion_skipped_permission": 0,
-        "orders_cancelled_during_regulation": 0,
-        "main_orders_placed": 0,
-        "counter_orders_placed": 0,
-        "counter_orders_skipped": 0,
-        "counter_orders_failed": 0,
-        "total_active_pending": 0,
-        "total_open_positions": 0,
-        "placement_errors": [],
-        "symbol_details": {}
-    }
-    
-    def get_all_existing_pending_orders():
-        """
-        Get ALL pending orders from MT5 for this account (no symbol filter).
-        
-        Returns:
-            dict: Dictionary of existing orders keyed by unique identifier
-        """
-        existing_orders = {}
-        
-        # Get all pending orders (no symbol parameter to avoid errors)
-        orders = mt5.orders_get()
-        if orders is None:
-            error_code = mt5.last_error()
-            print(f"        ℹ️ Could not fetch pending orders: {error_code}")
-            return existing_orders
-        
-        for order in orders:
-            try:
-                # For pending orders, use price (not price_open)
-                # Different MT5 versions might use different attribute names
-                order_price = getattr(order, 'price', None)
-                if order_price is None:
-                    order_price = getattr(order, 'price_open', 0)
-                
-                order_volume = getattr(order, 'volume_current', getattr(order, 'volume_initial', 0))
-                
-                # Create a unique key for this order
-                order_key = f"{order.symbol}_{order.type}_{order_price}_{order_volume}"
-                existing_orders[order_key] = {
-                    'ticket': order.ticket,
-                    'symbol': order.symbol,
-                    'type': order.type,
-                    'price': order_price,
-                    'volume': order_volume,
-                    'sl': order.sl,
-                    'time_setup': getattr(order, 'time_setup', 0),
-                    'type_string': "PENDING"
-                }
-            except Exception as e:
-                print(f"        ⚠️ Error processing pending order: {e}")
-                continue
-        
-        print(f"        📋 Found {len(existing_orders)} existing pending orders")
-        return existing_orders
-    
-    def get_all_existing_positions():
-        """
-        Get ALL open positions from MT5 for this account (no symbol filter).
-        
-        Returns:
-            dict: Dictionary of existing positions keyed by unique identifier
-        """
-        existing_positions = {}
-        
-        # Get all open positions (no symbol parameter to avoid errors)
-        positions = mt5.positions_get()
-        if positions is None:
-            error_code = mt5.last_error()
-            print(f"        ℹ️ Could not fetch open positions: {error_code}")
-            return existing_positions
-        
-        for position in positions:
-            try:
-                # For positions, use price_open
-                position_key = f"{position.symbol}_{position.type}_{position.price_open}_{position.volume}"
-                existing_positions[position_key] = {
-                    'ticket': position.ticket,
-                    'symbol': position.symbol,
-                    'type': position.type,
-                    'price': position.price_open,
-                    'volume': position.volume,
-                    'sl': position.sl,
-                    'time': getattr(position, 'time', 0),
-                    'type_string': "POSITION"
-                }
-            except Exception as e:
-                print(f"        ⚠️ Error processing position: {e}")
-                continue
-        
-        print(f"        📋 Found {len(existing_positions)} existing open positions")
-        return existing_positions
-    
-    def regulate_and_authorize_orders(symbol, pending_orders_to_keep, magic_number):
-        """
-        Cancel/delete any pending orders in the account that are not in signals.json.
-        
-        Args:
-            symbol: Symbol to regulate
-            pending_orders_to_keep: List of order keys that should be kept
-            magic_number: Magic number for orders
-            
-        Returns:
-            int: Number of orders cancelled
-        """
-        cancelled_count = 0
-        
-        # Get all pending orders for this symbol
-        orders = mt5.orders_get(symbol=symbol)
-        if orders is None:
-            print(f"      ℹ️ No pending orders found for {symbol} to regulate")
-            return cancelled_count
-        
-        for order in orders:
-            try:
-                # Only manage orders with our magic number
-                if order.magic != magic_number:
-                    continue
-                
-                # Create key for this order
-                order_price = getattr(order, 'price', getattr(order, 'price_open', 0))
-                order_volume = getattr(order, 'volume_current', getattr(order, 'volume_initial', 0))
-                order_key = f"{order.symbol}_{order.type}_{order_price}_{order_volume}"
-                
-                # Check if this order should be kept
-                if order_key not in pending_orders_to_keep:
-                    print(f"      🔍 Found unauthorized pending order: Ticket #{order.ticket} - {order_key}")
-                    
-                    # Prepare cancel request
-                    request = {
-                        "action": mt5.TRADE_ACTION_REMOVE,
-                        "order": order.ticket,
-                        "magic": magic_number,
-                        "comment": "Cancelled by regulation"
-                    }
-                    
-                    # Send cancel request
-                    result = mt5.order_send(request)
-                    
-                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                        print(f"      ✅ Cancelled unauthorized order: Ticket #{order.ticket}")
-                        cancelled_count += 1
-                    else:
-                        error_msg = result.comment if result else "Unknown error"
-                        print(f"      ❌ Failed to cancel order #{order.ticket}: {error_msg}")
-                        
-            except Exception as e:
-                print(f"      ⚠️ Error processing order for cancellation: {e}")
-                continue
-        
-        if cancelled_count > 0:
-            print(f"      🧹 Regulation complete: Cancelled {cancelled_count} unauthorized orders")
-        
-        return cancelled_count
-    
-    def is_order_too_close_to_positions(order_to_check, existing_positions):
-        """
-        Check if a pending order is too close to any existing open position
-        using risk-based proximity detection with halved risk threshold.
-        
-        ONLY compares:
-        - SELL orders with SELL positions
-        - BUY orders with BUY positions
-        
-        The risk threshold is HALF (position_risk / 2) to allow closer orders.
-        
-        Args:
-            order_to_check: Order dictionary from signals.json
-            existing_positions: Dictionary of ALL existing positions from MT5
-            
-        Returns:
-            tuple: (is_too_close, closest_position_details, reason)
-        """
-        symbol = order_to_check.get('symbol', '')
-        order_type = order_to_check.get('order_type', '')
-        entry_price = order_to_check.get('entry', 0)
-        volume = order_to_check.get('volume', 0.01)
-        
-        # Determine direction of the pending order
-        is_pending_buy = 'buy' in order_type.lower()
-        is_pending_sell = 'sell' in order_type.lower()
-        
-        if not is_pending_buy and not is_pending_sell:
-            return False, None, "Not a buy/sell order"
-        
-        # Filter positions for this symbol only
-        symbol_positions = []
-        for pos_key, position in existing_positions.items():
-            if position['symbol'] == symbol:
-                symbol_positions.append(position)
-        
-        if not symbol_positions:
-            return False, None, "No positions to check against"
-        
-        print(f"          🔍 Checking against {len(symbol_positions)} existing positions for closeness...")
-        
-        # Check each position for closeness
-        for position in symbol_positions:
-            position_type = position['type']  # mt5.ORDER_TYPE_BUY or mt5.ORDER_TYPE_SELL
-            position_entry = position['price']
-            position_sl = position['sl']
-            position_volume = position['volume']
-            position_ticket = position['ticket']
-            
-            is_position_buy = (position_type == mt5.ORDER_TYPE_BUY)
-            is_position_sell = (position_type == mt5.ORDER_TYPE_SELL)
-            
-            # =====================================================
-            # CRITICAL FIX: ONLY COMPARE SAME DIRECTIONS
-            # =====================================================
-            
-            # If pending is BUY but position is SELL -> SKIP (no comparison)
-            if is_pending_buy and is_position_sell:
-                print(f"            ⏭️ Skipping SELL position #{position_ticket} (different direction from BUY pending)")
-                continue
-                
-            # If pending is SELL but position is BUY -> SKIP (no comparison)
-            if is_pending_sell and is_position_buy:
-                print(f"            ⏭️ Skipping BUY position #{position_ticket} (different direction from SELL pending)")
-                continue
-            
-            # Now we ONLY proceed if directions match (BUY-BUY or SELL-SELL)
-            print(f"            ✅ Direction match: {'BUY' if is_pending_buy else 'SELL'} pending with {'BUY' if is_position_buy else 'SELL'} position #{position_ticket}")
-            
-            # Calculate position's own risk first
-            position_risk = 0
-            if position_sl and position_sl > 0:
-                if is_position_buy:
-                    # For buy position, risk is entry - SL
-                    position_risk_profit = mt5.order_calc_profit(
-                        mt5.ORDER_TYPE_BUY, symbol, position_volume,
-                        position_entry, position_sl
-                    )
-                else:  # sell position
-                    # For sell position, risk is SL - entry
-                    position_risk_profit = mt5.order_calc_profit(
-                        mt5.ORDER_TYPE_SELL, symbol, position_volume,
-                        position_entry, position_sl
-                    )
-                
-                if position_risk_profit is not None:
-                    position_risk = abs(position_risk_profit)
-            
-            if position_risk == 0:
-                print(f"            ⚠️ Position #{position_ticket} has no SL or risk calc failed - skipping closeness check")
-                continue
-            
-            # =====================================================
-            # NEW: HALVE THE POSITION RISK FOR THRESHOLD
-            # =====================================================
-            risk_threshold = position_risk / 2
-            
-            print(f"            Position #{position_ticket}: {'BUY' if is_position_buy else 'SELL'} @ {position_entry}, Risk: ${position_risk:.2f}")
-            print(f"            📊 Risk threshold (50%): ${risk_threshold:.2f}")
-            
-            # =====================================================
-            # APPLY CLOSENESS DETECTION ONLY FOR SAME DIRECTION
-            # =====================================================
-            
-            # CASE 1: Pending SELL order with SELL position (ONLY)
-            if is_pending_sell and is_position_sell:
-                if entry_price < position_entry:
-                    # SELL pending below SELL position
-                    print(f"            📐 SELL pending @ {entry_price} below SELL position @ {position_entry}")
-                    print(f"            🧮 Calculating risk: Entry={entry_price}, Exit={position_entry}")
-                    
-                    potential_risk_profit = mt5.order_calc_profit(
-                        mt5.ORDER_TYPE_SELL, symbol, volume,
-                        entry_price, position_entry
-                    )
-                else:
-                    # SELL pending above SELL position
-                    print(f"            📐 SELL pending @ {entry_price} above SELL position @ {position_entry}")
-                    print(f"            🧮 Calculating risk: Entry={position_entry}, Exit={entry_price}")
-                    
-                    potential_risk_profit = mt5.order_calc_profit(
-                        mt5.ORDER_TYPE_SELL, symbol, volume,
-                        position_entry, entry_price
-                    )
-                
-                if potential_risk_profit is not None:
-                    potential_risk = abs(potential_risk_profit)
-                    print(f"            💰 Potential risk if triggered: ${potential_risk:.2f}")
-                    print(f"            📊 Position risk threshold: ${risk_threshold:.2f}")
-                    
-                    if potential_risk < risk_threshold:
-                        print(f"            ❌ TOO CLOSE: ${potential_risk:.2f} < ${risk_threshold:.2f}")
-                        return True, position, f"Too close to SELL position #{position_ticket}"
-                    else:
-                        print(f"            ✅ SAFE DISTANCE: ${potential_risk:.2f} >= ${risk_threshold:.2f}")
-            
-            # CASE 2: Pending BUY order with BUY position (ONLY)
-            elif is_pending_buy and is_position_buy:
-                if entry_price > position_entry:
-                    # BUY pending above BUY position
-                    print(f"            📐 BUY pending @ {entry_price} above BUY position @ {position_entry}")
-                    print(f"            🧮 Calculating risk: Entry={position_entry}, Exit={entry_price}")
-                    
-                    potential_risk_profit = mt5.order_calc_profit(
-                        mt5.ORDER_TYPE_BUY, symbol, volume,
-                        position_entry, entry_price
-                    )
-                else:
-                    # BUY pending below BUY position
-                    print(f"            📐 BUY pending @ {entry_price} below BUY position @ {position_entry}")
-                    print(f"            🧮 Calculating risk: Entry={entry_price}, Exit={position_entry}")
-                    
-                    potential_risk_profit = mt5.order_calc_profit(
-                        mt5.ORDER_TYPE_BUY, symbol, volume,
-                        entry_price, position_entry
-                    )
-                
-                if potential_risk_profit is not None:
-                    potential_risk = abs(potential_risk_profit)
-                    print(f"            💰 Potential risk if triggered: ${potential_risk:.2f}")
-                    print(f"            📊 Position risk threshold: ${risk_threshold:.2f}")
-                    
-                    if potential_risk < risk_threshold:
-                        print(f"            ❌ TOO CLOSE: ${potential_risk:.2f} < ${risk_threshold:.2f}")
-                        return True, position, f"Too close to BUY position #{position_ticket}"
-                    else:
-                        print(f"            ✅ SAFE DISTANCE: ${potential_risk:.2f} >= ${risk_threshold:.2f}")
-        
-        return False, None, "All matching-direction positions are at safe distance"
-
-    def order_exists(order_to_check, existing_orders, existing_positions):
-        """
-        Check if an order already exists in MT5 (either pending or as open position).
-        
-        Args:
-            order_to_check: Order dictionary from signals.json
-            existing_orders: Dictionary of ALL existing pending orders from MT5
-            existing_positions: Dictionary of ALL existing positions from MT5
-            
-        Returns:
-            tuple: (exists, type) where type is 'pending', 'position', or None
-        """
-        order_type = order_to_check.get('order_type', '')
-        entry_price = order_to_check.get('entry', 0)
-        volume = order_to_check.get('volume', 0.01)
-        symbol = order_to_check.get('symbol', '')
-        
-        # Round volume to avoid floating point precision issues
-        volume = round(volume, 2)
-        
-        # Map order type string to MT5 order type for pending orders
-        mt5_pending_type = None
-        if order_type == 'buy_stop':
-            mt5_pending_type = mt5.ORDER_TYPE_BUY_STOP
-        elif order_type == 'buy_limit':
-            mt5_pending_type = mt5.ORDER_TYPE_BUY_LIMIT
-        elif order_type == 'sell_stop':
-            mt5_pending_type = mt5.ORDER_TYPE_SELL_STOP
-        elif order_type == 'sell_limit':
-            mt5_pending_type = mt5.ORDER_TYPE_SELL_LIMIT
-        
-        # Map order type string to MT5 position type
-        mt5_position_type = None
-        if order_type in ['buy_stop', 'buy_limit']:
-            mt5_position_type = mt5.ORDER_TYPE_BUY
-        elif order_type in ['sell_stop', 'sell_limit']:
-            mt5_position_type = mt5.ORDER_TYPE_SELL
-        
-        # Check pending orders first
-        if mt5_pending_type:
-            pending_key = f"{symbol}_{mt5_pending_type}_{entry_price}_{volume}"
-            if pending_key in existing_orders:
-                print(f"          🔍 Found duplicate PENDING: {symbol} {order_type} @ {entry_price}")
-                return True, 'pending'
-        
-        # Check open positions
-        if mt5_position_type:
-            position_key = f"{symbol}_{mt5_position_type}_{entry_price}_{volume}"
-            if position_key in existing_positions:
-                print(f"          🔍 Found duplicate POSITION: {symbol} {order_type} @ {entry_price}")
-                return True, 'position'
-        
-        return False, None
-    
-    def convert_order_type_logic(order_type):
-        """
-        Convert order type to its opposite (stop ↔ limit).
-        
-        Args:
-            order_type: Original order type string
-            
-        Returns:
-            str: Converted order type
-        """
-        conversion_map = {
-            'buy_stop': 'buy_limit',
-            'buy_limit': 'buy_stop',
-            'sell_stop': 'sell_limit',
-            'sell_limit': 'sell_stop'
-        }
-        return conversion_map.get(order_type, order_type)
-    
-    def get_valid_price_for_conversion(original_order_type, target_order_type, current_price, original_entry):
-        """
-        Get a valid price for the converted order type.
-        
-        Args:
-            original_order_type: Original order type
-            target_order_type: Target order type after conversion
-            current_price: Current market price (bid or ask as appropriate)
-            original_entry: Original entry price
-            
-        Returns:
-            float: Valid price for the target order type
-        """
-        # For buy orders
-        if target_order_type == 'buy_limit':
-            # Buy limit must be below ask - use original price if it's below ask, otherwise use ask - 1 pip
-            if original_entry < current_price:
-                return original_entry
-            else:
-                # Use current price minus a small buffer (1 point)
-                return current_price - 0.01
-        
-        elif target_order_type == 'buy_stop':
-            # Buy stop must be above ask - use original price if it's above ask, otherwise use ask + 1 pip
-            if original_entry > current_price:
-                return original_entry
-            else:
-                # Use current price plus a small buffer (1 point)
-                return current_price + 0.01
-        
-        # For sell orders
-        elif target_order_type == 'sell_limit':
-            # Sell limit must be above bid - use original price if it's above bid, otherwise use bid + 1 pip
-            if original_entry > current_price:
-                return original_entry
-            else:
-                # Use current price plus a small buffer (1 point)
-                return current_price + 0.01
-        
-        elif target_order_type == 'sell_stop':
-            # Sell stop must be below bid - use original price if it's below bid, otherwise use bid - 1 pip
-            if original_entry < current_price:
-                return original_entry
-            else:
-                # Use current price minus a small buffer (1 point)
-                return current_price - 0.01
-        
-        return original_entry
-    
-    def get_current_price(symbol):
-        """
-        Get current market price for a symbol.
-        
-        Args:
-            symbol: Symbol name
-            
-        Returns:
-            tuple: (bid, ask) current prices or (None, None) if error
-        """
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            return None, None
-        return tick.bid, tick.ask
-    
-    def place_exact_order_type(order_data, is_counter=False, is_converted=False):
-        """
-        Place an order in MT5 with the exact order type and price.
-        
-        Args:
-            order_data: Dictionary with order parameters
-            is_counter: Boolean indicating if this is a counter order
-            is_converted: Boolean indicating if this is a converted order type
-            
-        Returns:
-            tuple: (success, order_result, error_message, final_order_type, final_price)
-        """
-        try:
-            # Prepare order request
-            symbol = order_data.get('symbol')
-            order_type = order_data.get('order_type')
-            volume = order_data.get('volume', 0.01)
-            entry_price = order_data.get('entry')
-            stoploss = order_data.get('exit')
-            comment = order_data.get('comment', '')
-            magic = order_data.get('magic', 0)
-            
-            # Map order type string to MT5 order type
-            if order_type == 'buy_stop':
-                mt5_type = mt5.ORDER_TYPE_BUY_STOP
-                order_direction = "BUY STOP"
-            elif order_type == 'buy_limit':
-                mt5_type = mt5.ORDER_TYPE_BUY_LIMIT
-                order_direction = "BUY LIMIT"
-            elif order_type == 'sell_stop':
-                mt5_type = mt5.ORDER_TYPE_SELL_STOP
-                order_direction = "SELL STOP"
-            elif order_type == 'sell_limit':
-                mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
-                order_direction = "SELL LIMIT"
-            else:
-                return False, None, f"Invalid order type: {order_type}", order_type, entry_price
-            
-            # Get symbol info
-            symbol_info = mt5.symbol_info(symbol)
-            if symbol_info is None:
-                return False, None, f"Cannot get symbol info for {symbol}", order_type, entry_price
-            
-            # Prepare the request
-            request = {
-                "action": mt5.TRADE_ACTION_PENDING,
-                "symbol": symbol,
-                "volume": float(volume),
-                "type": mt5_type,
-                "price": float(entry_price),
-                "sl": float(stoploss) if stoploss else 0.0,
-                "tp": 0.0,
-                "deviation": 20,
-                "magic": magic,
-                "comment": comment[:31] if comment else f"{'COUNTER' if is_counter else 'MAIN'}{' (CONVERTED)' if is_converted else ''}",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_RETURN,
-            }
-            
-            # Send order
-            result = mt5.order_send(request)
-            
-            # Check if result is None
-            if result is None:
-                error_code = mt5.last_error()
-                error_msg = f"Order send failed: {error_code}"
-                print(f"          ❌ {error_msg}")
-                return False, None, error_msg, order_type, entry_price
-            
-            if result.retcode != mt5.TRADE_RETCODE_DONE:
-                error_msg = f"Order failed: {result.comment} (code: {result.retcode})"
-                print(f"          ❌ {error_msg}")
-                return False, None, error_msg, order_type, entry_price
-            
-            print(f"          ✅ {order_direction} placed successfully: Ticket #{result.order}{' (CONVERTED)' if is_converted else ''} at {entry_price:.2f}")
-            print(f"          ℹ️ This is a PENDING ORDER - will auto-execute when price reaches {entry_price}")
-            return True, result, None, order_type, entry_price
-            
-        except Exception as e:
-            error_msg = f"Exception placing order: {str(e)}"
-            print(f"          ❌ {error_msg}")
-            return False, None, error_msg, order_data.get('order_type', 'unknown'), order_data.get('entry', 0)
-    
-    def place_counter_order(main_order, main_ticket, symbol, magic_number, existing_orders, existing_positions, allow_conversion):
-        """
-        Place the counter order for a successfully placed main order.
-        
-        Args:
-            main_order: Original main order dictionary that contains order_counter
-            main_ticket: Ticket number of the successfully placed main order
-            symbol: Symbol name
-            magic_number: Magic number for orders
-            existing_orders: Dictionary of existing pending orders
-            existing_positions: Dictionary of existing positions
-            allow_conversion: Whether order type conversion is allowed
-            
-        Returns:
-            tuple: (success, result, error_message, was_skipped, skip_reason, was_converted)
-        """
-        print(f"\n          🔄 PLACING COUNTER ORDER for main ticket {main_ticket}...")
-        
-        # Check if counter order exists in the main order
-        if 'order_counter' not in main_order:
-            print(f"          ℹ️ No counter order found in main order data")
-            return False, None, None, True, 'no_counter', False
-        
-        counter_order = main_order['order_counter'].copy()
-        
-        # Add required fields to counter order
-        counter_order['symbol'] = symbol
-        counter_order['magic'] = magic_number
-        
-        # Check if counter order already exists
-        exists, exists_type = order_exists(counter_order, existing_orders, existing_positions)
-        
-        if exists:
-            order_type = counter_order.get('order_type', 'unknown')
-            entry = counter_order.get('entry', 0)
-            if exists_type == 'pending':
-                print(f"          ⏭️ Counter {order_type} @ {entry} - SKIP (already exists as PENDING order)")
-                return False, None, None, True, 'pending', False
-            else:  # position
-                print(f"          ⏭️ Counter {order_type} @ {entry} - SKIP (already exists as OPEN POSITION)")
-                return False, None, None, True, 'position', False
-        
-        # Check if counter order is too close to positions
-        is_too_close, close_position, close_reason = is_order_too_close_to_positions(counter_order, existing_positions)
-        
-        if is_too_close:
-            order_type = counter_order.get('order_type', 'unknown')
-            entry = counter_order.get('entry', 0)
-            print(f"          ⏭️ Counter {order_type} @ {entry} - SKIP (too close to position)")
-            print(f"          📋 Reason: {close_reason}")
-            return False, None, None, True, 'too_close', False
-        
-        # Place the counter order
-        order_type = counter_order.get('order_type', 'unknown')
-        entry = counter_order.get('entry', 0)
-        print(f"          📤 Placing counter {order_type} @ {entry}...")
-        
-        # Try to place the exact order type
-        success, result, error, final_type, final_price = place_exact_order_type(counter_order, True, False)
-        
-        # If failed due to invalid price, check if conversion is allowed
-        if not success and error and ("Invalid price" in error or "10015" in error):
-            if allow_conversion:
-                print(f"          🔄 Invalid price detected for counter order and conversion is ALLOWED, attempting conversion...")
-                success, result, error, was_converted, final_type, final_price = convert_and_place_order(
-                    counter_order, error, True, 0
-                )
-                return success, result, error, False, None, was_converted
-            else:
-                print(f"          ⚠️ Invalid price detected but conversion is NOT ALLOWED (allow_order_type_conversion=false)")
-                print(f"          ❌ Counter order failed permanently: {error}")
-                return False, None, error, False, None, False
-        
-        return success, result, error, False, None, False
-    
-    def convert_and_place_order(order_data, original_error, is_counter=False, conversion_attempts=0):
-        """
-        Convert order type and place with adjusted price when original order fails.
-        
-        Args:
-            order_data: Original order dictionary
-            original_error: Original error message
-            is_counter: Boolean indicating if this is a counter order
-            conversion_attempts: Number of conversion attempts already made
-            
-        Returns:
-            tuple: (success, order_result, error_message, was_converted, final_order_type, final_price)
-        """
-        if conversion_attempts >= 2:
-            return False, None, f"Max conversion attempts reached. Original error: {original_error}", False, order_data.get('order_type'), order_data.get('entry')
-        
-        symbol = order_data.get('symbol')
-        order_type = order_data.get('order_type')
-        entry_price = order_data.get('entry')
-        stoploss = order_data.get('exit')
-        
-        # Get current price for conversion
-        bid, ask = get_current_price(symbol)
-        current_price = ask if 'buy' in order_type else bid
-        
-        # Convert order type
-        converted_type = convert_order_type_logic(order_type)
-        
-        # Get valid price for converted order
-        valid_price = get_valid_price_for_conversion(order_type, converted_type, current_price, entry_price)
-        
-        print(f"          🔄 Converting {order_type} @ {entry_price} to {converted_type} @ {valid_price:.2f}...")
-        
-        # Create converted order data
-        converted_order = order_data.copy()
-        converted_order['order_type'] = converted_type
-        converted_order['entry'] = valid_price
-        
-        # Adjust stoploss proportionally if present
-        if stoploss:
-            price_diff_ratio = valid_price / entry_price
-            converted_order['exit'] = stoploss * price_diff_ratio
-        
-        # Try to place the converted order
-        success, result, error, final_type, final_price = place_exact_order_type(
-            converted_order, is_counter, True
-        )
-        
-        if success:
-            return success, result, error, True, final_type, final_price
-        else:
-            # If conversion fails, try one more time with different adjustment
-            if conversion_attempts < 1:
-                print(f"          🔄 First conversion attempt failed, trying alternative adjustment...")
-                # Adjust price differently based on order type
-                if converted_type in ['buy_limit', 'sell_stop']:
-                    # Need lower price
-                    valid_price = current_price - 0.02
-                else:
-                    # Need higher price
-                    valid_price = current_price + 0.02
-                
-                converted_order['entry'] = valid_price
-                if stoploss:
-                    price_diff_ratio = valid_price / entry_price
-                    converted_order['exit'] = stoploss * price_diff_ratio
-                
-                success, result, error, final_type, final_price = place_exact_order_type(
-                    converted_order, is_counter, True
-                )
-                
-                if success:
-                    return success, result, error, True, final_type, final_price
-            
-            return False, None, f"Conversion failed: {error}", False, order_type, entry_price
-    
-    def process_single_order(order, symbol, magic_number, existing_orders, existing_positions, is_counter=False, allow_conversion=False):
-        """
-        Process and place a single order.
-        
-        Args:
-            order: Order dictionary
-            symbol: Symbol name
-            magic_number: Magic number for orders
-            existing_orders: Dictionary of ALL existing pending orders
-            existing_positions: Dictionary of ALL existing open positions
-            is_counter: Whether this is a counter order
-            allow_conversion: Whether order type conversion is allowed
-            
-        Returns:
-            tuple: (success, order_result, error_message, was_skipped, skip_reason, was_converted, final_price)
-        """
-        # Add symbol and magic to order data
-        order['symbol'] = symbol
-        order['magic'] = magic_number
-        
-        # STEP 1: Check if order already exists (either pending or as position)
-        exists, exists_type = order_exists(order, existing_orders, existing_positions)
-        
-        if exists:
-            order_type = order.get('order_type', 'unknown')
-            entry = order.get('entry', 0)
-            if exists_type == 'pending':
-                print(f"          ⏭️ {'Counter' if is_counter else 'Main'} {order_type} @ {entry} - SKIP (already exists as PENDING order)")
-                return False, None, None, True, 'pending', False, entry
-            else:  # position
-                print(f"          ⏭️ {'Counter' if is_counter else 'Main'} {order_type} @ {entry} - SKIP (already exists as OPEN POSITION)")
-                return False, None, None, True, 'position', False, entry
-        
-        # STEP 2: Check if order is too close to any existing position using risk-based detection
-        is_too_close, close_position, close_reason = is_order_too_close_to_positions(order, existing_positions)
-        
-        if is_too_close:
-            order_type = order.get('order_type', 'unknown')
-            entry = order.get('entry', 0)
-            print(f"          ⏭️ {'Counter' if is_counter else 'Main'} {order_type} @ {entry} - SKIP (too close to position)")
-            print(f"          📋 Reason: {close_reason}")
-            return False, None, None, True, 'too_close', False, entry
-        
-        # STEP 3: Place the order directly - NO PRICE VALIDATION for pending orders
-        # Pending orders are SUPPOSED to be placed at prices not yet reached
-        order_type = order.get('order_type', 'unknown')
-        entry = order.get('entry', 0)
-        print(f"          📤 Placing {'counter' if is_counter else 'main'} {order_type} @ {entry}...")
-        
-        # Try to place the exact order type first
-        success, result, error, final_type, final_price = place_exact_order_type(order, is_counter, False)
-        
-        # If failed due to invalid price, check if conversion is allowed
-        if not success and error and ("Invalid price" in error or "10015" in error):
-            if allow_conversion:
-                print(f"          🔄 Invalid price detected and conversion is ALLOWED, attempting conversion...")
-                success, result, error, was_converted, final_type, final_price = convert_and_place_order(
-                    order, error, is_counter, 0
-                )
-                return success, result, error, False, None, was_converted, final_price
-            else:
-                print(f"          ⚠️ Invalid price detected but conversion is NOT ALLOWED (allow_order_type_conversion=false)")
-                print(f"          ❌ Order failed permanently: {error}")
-                return False, None, error, False, None, False, final_price
-        
-        return success, result, error, False, None, False, final_price
-    
-    # If inv_id is provided, process only that investor
-    if inv_id:
-        inv_root = Path(INV_PATH) / inv_id
-        prices_dir = inv_root / "prices"
-        
-        # Path to accountmanagement.json and signals.json
-        acc_mgmt_path = inv_root / "accountmanagement.json"
-        signals_path = prices_dir / "signals.json"
-        
-        # =====================================================
-        # STEP 1: Check account management settings
-        # =====================================================
-        print(f"\n [{inv_id}] 🔍 Checking account management settings...")
-        
-        if not acc_mgmt_path.exists():
-            print(f" [{inv_id}] ⚠️ accountmanagement.json not found at {acc_mgmt_path}")
-            print(f" [{inv_id}] ⏭️ Skipping order placement (no settings to check)")
-            stats["investors_skipped_due_to_settings"] += 1
-            return stats
-        
-        try:
-            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
-                acc_config = json.load(f)
-            
-            # Check if auto trading is enabled
-            settings = acc_config.get("settings", {})
-            enable_auto_trading = settings.get("enable_auto_trading", False)
-            
-            if not enable_auto_trading:
-                print(f" [{inv_id}] ⏭️ Auto trading is DISABLED in accountmanagement.json")
-                print(f"     (settings.enable_auto_trading = false)")
-                stats["investors_skipped_due_to_settings"] += 1
-                return stats
-            
-            # Check if order type conversion is allowed
-            allow_order_type_conversion = settings.get("allow_order_type_conversion", False)
-            
-            # Get trading parameters
-            max_spread = settings.get("max_spread", 50)
-            max_slippage = settings.get("max_slippage", 20)
-            order_ttl = settings.get("order_ttl", 3600)
-            
-            print(f" [{inv_id}] ✅ Auto trading is ENABLED")
-            print(f"     • Order type conversion: {'ALLOWED' if allow_order_type_conversion else 'NOT ALLOWED'}")
-            print(f"     • Max spread: {max_spread} points")
-            print(f"     • Max slippage: {max_slippage} points")
-            print(f"     • Order TTL: {order_ttl} seconds")
-            print(f"     • Pending orders: Will auto-execute when price reaches entry level")
-            
-            stats["investors_processed"] += 1
-            
-        except json.JSONDecodeError as e:
-            print(f" [{inv_id}] ❌ Invalid JSON in accountmanagement.json: {e}")
-            print(f" [{inv_id}] ⏭️ Skipping order placement due to config error")
-            stats["investors_skipped_due_to_settings"] += 1
-            return stats
-        except Exception as e:
-            print(f" [{inv_id}] ❌ Error reading accountmanagement.json: {e}")
-            print(f" [{inv_id}] ⏭️ Skipping order placement due to config error")
-            stats["investors_skipped_due_to_settings"] += 1
-            return stats
-        
-        # Continue with order placement if enabled
-        if not signals_path.exists():
-            print(f" [{inv_id}] ❌ signals.json not found at {signals_path}")
-            return stats
-        
-        try:
-            print(f" [{inv_id}] 📂 Loading signals.json...")
-            with open(signals_path, 'r', encoding='utf-8') as f:
-                signals_data = json.load(f)
-            
-            # Get ALL existing pending orders for this account (no symbol filter)
-            print(f" [{inv_id}] 🔍 Checking ALL existing pending orders...")
-            existing_orders = get_all_existing_pending_orders()
-            stats["total_active_pending"] = len(existing_orders)
-            
-            # Get ALL existing open positions for this account (no symbol filter)
-            print(f" [{inv_id}] 🔍 Checking ALL existing open positions...")
-            existing_positions = get_all_existing_positions()
-            stats["total_open_positions"] = len(existing_positions)
-            
-            print(f" [{inv_id}] 📊 Account summary: {stats['total_active_pending']} pending, {stats['total_open_positions']} positions")
-            
-            # Magic number from investor ID
-            magic_number = int(inv_id) if inv_id.isdigit() else 0
-            
-            # Process each category and symbol
-            for category_name, category_data in signals_data.get('categories', {}).items():
-                symbols_in_category = category_data.get('symbols', {})
-                
-                for symbol, symbol_signals in symbols_in_category.items():
-                    stats["symbols_processed"] += 1
-                    
-                    print(f"\n    🔍 Processing {symbol} for order placement:")
-                    
-                    # Initialize symbol details
-                    symbol_detail = {
-                        "symbol": symbol,
-                        "category": category_name,
-                        "orders_attempted": 0,
-                        "orders_placed": 0,
-                        "orders_converted": 0,
-                        "orders_conversion_skipped_permission": 0,
-                        "orders_skipped_pending": 0,
-                        "orders_skipped_position": 0,
-                        "orders_skipped_too_close": 0,
-                        "orders_failed": 0,
-                        "orders_cancelled_during_regulation": 0,
-                        "main_orders_placed": 0,
-                        "counter_orders_placed": 0,
-                        "counter_orders_skipped": 0,
-                        "counter_orders_failed": 0,
-                        "errors": []
-                    }
-                    
-                    # Check spread for this symbol
-                    symbol_info = mt5.symbol_info(symbol)
-                    if symbol_info:
-                        current_spread = symbol_info.spread
-                        print(f"      📊 Current spread for {symbol}: {current_spread} points")
-                        
-                        if current_spread > max_spread:
-                            print(f"      ⚠️ Spread {current_spread} exceeds max allowed {max_spread} - may affect order placement")
-                    
-                    # Get current prices for reference
-                    bid, ask = get_current_price(symbol)
-                    if bid and ask:
-                        print(f"      💵 Current prices - Bid: {bid:.2f}, Ask: {ask:.2f}")
-                    
-                    # COLLECT ALL ORDERS FROM BOTH ARRAYS - INCLUDING COUNTERS
-                    all_orders_to_process = []
-                    pending_orders_to_keep = set()  # Track orders that should be kept for regulation
-                    
-                    # Helper function to add an order to processing list
-                    def add_order_to_process(order_obj, source, is_counter_val):
-                        all_orders_to_process.append({
-                            'order': order_obj,
-                            'source': source,
-                            'is_counter': is_counter_val
-                        })
-                        
-                        # Generate key for regulation
-                        ord_type = order_obj.get('order_type', '')
-                        ord_entry = order_obj.get('entry', 0)
-                        ord_volume = round(order_obj.get('volume', 0.01), 2)
-                        mt5_type = None
-                        if ord_type == 'buy_stop':
-                            mt5_type = mt5.ORDER_TYPE_BUY_STOP
-                        elif ord_type == 'buy_limit':
-                            mt5_type = mt5.ORDER_TYPE_BUY_LIMIT
-                        elif ord_type == 'sell_stop':
-                            mt5_type = mt5.ORDER_TYPE_SELL_STOP
-                        elif ord_type == 'sell_limit':
-                            mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
-                        
-                        if mt5_type:
-                            pending_orders_to_keep.add(f"{symbol}_{mt5_type}_{ord_entry}_{ord_volume}")
-                    
-                    # Process bid_orders
-                    bid_orders = symbol_signals.get('bid_orders', [])
-                    for order in bid_orders:
-                        # Add main bid order
-                        add_order_to_process(order, 'bid_orders', False)
-                        
-                        # Add counter order if present
-                        if 'order_counter' in order and order['order_counter']:
-                            add_order_to_process(order['order_counter'], 'bid_orders_counter', True)
-                    
-                    # Process ask_orders
-                    ask_orders = symbol_signals.get('ask_orders', [])
-                    for order in ask_orders:
-                        # Add main ask order
-                        add_order_to_process(order, 'ask_orders', False)
-                        
-                        # Add counter order if present
-                        if 'order_counter' in order and order['order_counter']:
-                            add_order_to_process(order['order_counter'], 'ask_orders_counter', True)
-                    
-                    print(f"      📦 Found {len(all_orders_to_process)} total orders to process (including counters)")
-                    
-                    # =====================================================
-                    # STEP 2: Regulate and authorize orders
-                    # =====================================================
-                    print(f"      🧹 Regulating pending orders for {symbol}...")
-                    cancelled_count = regulate_and_authorize_orders(symbol, pending_orders_to_keep, magic_number)
-                    symbol_detail["orders_cancelled_during_regulation"] = cancelled_count
-                    stats["orders_cancelled_during_regulation"] += cancelled_count
-                    
-                    # Process ALL orders (main and counter) in a single pass
-                    for idx, order_info in enumerate(all_orders_to_process):
-                        order = order_info['order']
-                        is_counter = order_info['is_counter']
-                        
-                        stats["orders_attempted"] += 1
-                        symbol_detail["orders_attempted"] += 1
-                        
-                        # Process the order
-                        success, result, error, was_skipped, skip_reason, was_converted, final_price = process_single_order(
-                            order, symbol, magic_number, existing_orders, existing_positions, is_counter, allow_order_type_conversion
-                        )
-                        
-                        if was_skipped:
-                            if skip_reason == 'pending':
-                                stats["orders_skipped_duplicate_pending"] += 1
-                                symbol_detail["orders_skipped_pending"] += 1
-                            elif skip_reason == 'position':
-                                stats["orders_skipped_duplicate_position"] += 1
-                                symbol_detail["orders_skipped_position"] += 1
-                            elif skip_reason == 'too_close':
-                                stats["orders_skipped_too_close_to_position"] += 1
-                                symbol_detail["orders_skipped_too_close"] += 1
-                            
-                            # Track counter order skips separately
-                            if is_counter:
-                                stats["counter_orders_skipped"] += 1
-                                symbol_detail["counter_orders_skipped"] += 1
-                            
-                        elif success:
-                            stats["orders_placed"] += 1
-                            symbol_detail["orders_placed"] += 1
-                            
-                            if was_converted:
-                                stats["orders_converted_and_placed"] += 1
-                                symbol_detail["orders_converted"] += 1
-                            
-                            if is_counter:
-                                stats["counter_orders_placed"] += 1
-                                symbol_detail["counter_orders_placed"] += 1
-                            else:
-                                stats["main_orders_placed"] += 1
-                                symbol_detail["main_orders_placed"] += 1
-                            
-                            # Map order type string to MT5 order type for the key
-                            order_type = order.get('order_type', '')
-                            mt5_pending_type = None
-                            
-                            if order_type == 'buy_stop':
-                                mt5_pending_type = mt5.ORDER_TYPE_BUY_STOP
-                            elif order_type == 'buy_limit':
-                                mt5_pending_type = mt5.ORDER_TYPE_BUY_LIMIT
-                            elif order_type == 'sell_stop':
-                                mt5_pending_type = mt5.ORDER_TYPE_SELL_STOP
-                            elif order_type == 'sell_limit':
-                                mt5_pending_type = mt5.ORDER_TYPE_SELL_LIMIT
-                            
-                            # Round volume for key
-                            volume_rounded = round(order.get('volume', 0.01), 2)
-                            
-                            # Add to existing_orders to prevent duplicate placement in same run
-                            if mt5_pending_type:
-                                pending_key = f"{symbol}_{mt5_pending_type}_{final_price}_{volume_rounded}"
-                                existing_orders[pending_key] = {
-                                    'ticket': result.order,
-                                    'symbol': symbol,
-                                    'type': mt5_pending_type,
-                                    'price': final_price,
-                                    'volume': volume_rounded,
-                                    'type_string': "PENDING"
-                                }
-                                print(f"          🔒 Added to duplicate prevention cache: {pending_key}")
-                            
-                        else:
-                            stats["orders_failed"] += 1
-                            symbol_detail["orders_failed"] += 1
-                            
-                            if is_counter:
-                                stats["counter_orders_failed"] += 1
-                                symbol_detail["counter_orders_failed"] += 1
-                            
-                            # Track if failure was due to conversion not being allowed
-                            if error and "conversion is NOT ALLOWED" in error:
-                                stats["orders_conversion_skipped_permission"] += 1
-                                symbol_detail["orders_conversion_skipped_permission"] += 1
-                            
-                            if error:
-                                symbol_detail["errors"].append(f"{'Counter' if is_counter else 'Main'} order {idx+1}: {error}")
-                    
-                    # Store symbol details
-                    stats["symbol_details"][symbol] = symbol_detail
-            
-            # Print summary
-            print(f"\n  📊 ORDER PLACEMENT SUMMARY:")
-            print(f"    • Symbols processed: {stats['symbols_processed']}")
-            print(f"    • Total orders attempted: {stats['orders_attempted']}")
-            print(f"    • Orders placed: {stats['orders_placed']}")
-            print(f"      - Main orders: {stats['main_orders_placed']}")
-            print(f"      - Counter orders: {stats['counter_orders_placed']}")
-            print(f"      - Converted orders: {stats['orders_converted_and_placed']}")
-            print(f"    • Counter orders skipped: {stats.get('counter_orders_skipped', 0)}")
-            print(f"    • Counter orders failed: {stats['counter_orders_failed']}")
-            print(f"    • Orders cancelled during regulation: {stats['orders_cancelled_during_regulation']}")
-            print(f"    • Orders skipped (duplicate pending): {stats['orders_skipped_duplicate_pending']}")
-            print(f"    • Orders skipped (duplicate position): {stats['orders_skipped_duplicate_position']}")
-            print(f"    • Orders skipped (too close to position): {stats['orders_skipped_too_close_to_position']}")
-            print(f"    • Orders conversion skipped (permission denied): {stats['orders_conversion_skipped_permission']}")
-            print(f"    • Orders failed: {stats['orders_failed']}")
-            print(f"    • Total active pending orders: {stats['total_active_pending']}")
-            print(f"    • Total open positions: {stats['total_open_positions']}")
-            
-            if stats['orders_failed'] > 0:
-                print(f"\n  ❌ FAILED ORDER DETAILS:")
-                for symbol, detail in stats["symbol_details"].items():
-                    if detail["orders_failed"] > 0:
-                        print(f"    • {symbol}: {detail['orders_failed']} failures")
-                        for error in detail["errors"][:5]:
-                            print(f"        • {error}")
-            
-        except Exception as e:
-            print(f" [{inv_id}] ❌ Error in order placement: {e}")
-            import traceback
-            traceback.print_exc()
-            stats["placement_errors"].append(str(e))
-    
-    return stats
-
 def place_signals_orders_accounts(inv_id=None):
     """
     Place orders from signals.json for specified investor(s).
@@ -8652,6 +7519,7 @@ def place_signals_orders_accounts(inv_id=None):
         "investor_id": inv_id if inv_id else "all",
         "investors_processed": 0,
         "investors_skipped_due_to_settings": 0,
+        "investors_skipped_due_to_position_flag": 0,
         "symbols_processed": 0,
         "orders_attempted": 0,
         "orders_placed": 0,
@@ -9560,329 +8428,669 @@ def place_signals_orders_accounts(inv_id=None):
         return success, result, error, False, None, False, final_price, 'placed'
     
     # If inv_id is provided, process only that investor
-    if inv_id:
-        inv_root = Path(INV_PATH) / inv_id
-        prices_dir = inv_root / "prices"
-        
-        # Path to accountmanagement.json and signals.json
-        acc_mgmt_path = inv_root / "accountmanagement.json"
-        signals_path = prices_dir / "signals.json"
-        
-        # =====================================================
-        # STEP 1: Check account management settings
-        # =====================================================
-        print(f"\n [{inv_id}] 🔍 Checking account management settings...")
-        
-        if not acc_mgmt_path.exists():
-            print(f" [{inv_id}] ⚠️ accountmanagement.json not found at {acc_mgmt_path}")
-            print(f" [{inv_id}] ⏭️ Skipping order placement (no settings to check)")
-            stats["investors_skipped_due_to_settings"] += 1
-            return stats
-        
-        try:
-            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
-                acc_config = json.load(f)
+    def main():
+        if inv_id:
+            inv_root = Path(INV_PATH) / inv_id
+            prices_dir = inv_root / "prices"
             
-            # Check if auto trading is enabled
-            settings = acc_config.get("settings", {})
-            enable_auto_trading = settings.get("enable_auto_trading", False)
+            # Path to accountmanagement.json and signals.json
+            acc_mgmt_path = inv_root / "accountmanagement.json"
+            signals_path = prices_dir / "signals.json"
             
-            if not enable_auto_trading:
-                print(f" [{inv_id}] ⏭️ Auto trading is DISABLED in accountmanagement.json")
-                print(f"     (settings.enable_auto_trading = false)")
+            # =====================================================
+            # STEP 1: CALL manage_single_position_and_pending FIRST
+            # =====================================================
+            print(f"\n [{inv_id}] 🔍 Checking single position/pending management flag...")
+            
+            # Call the function to get the upload_orders flag
+            try:
+                # Import the function (assuming it's in the same module or imported)
+                # If it's in the same file, just call it directly
+                management_result = manage_single_position_and_pending(inv_id=inv_id)
+                upload_orders_flag = management_result.get("upload_orders", True)
+                stats["upload_orders_flag"] = upload_orders_flag
+                
+                print(f" [{inv_id}] 🚩 upload_orders flag: {upload_orders_flag}")
+                
+                # If upload_orders is False, skip order placement entirely
+                if not upload_orders_flag:
+                    print(f" [{inv_id}] ⏭️ SKIPPING order placement - position with close opposite order exists")
+                    print(f"     Reason: A position with a close opposite pending order was found and kept")
+                    stats["investors_skipped_due_to_position_flag"] += 1
+                    return stats
+                else:
+                    print(f" [{inv_id}] ✅ PROCEEDING with order placement - no conflicting position/order pair found")
+                    
+            except Exception as e:
+                print(f" [{inv_id}] ⚠️ Could not check manage_single_position_and_pending: {e}")
+                print(f" [{inv_id}] ⏭️ Proceeding with order placement by default (upload_orders assumed True)")
+                stats["upload_orders_flag"] = True  # Default to True if function fails
+            
+            # =====================================================
+            # STEP 2: Check account management settings
+            # =====================================================
+            print(f"\n [{inv_id}] 🔍 Checking account management settings...")
+            
+            if not acc_mgmt_path.exists():
+                print(f" [{inv_id}] ⚠️ accountmanagement.json not found at {acc_mgmt_path}")
+                print(f" [{inv_id}] ⏭️ Skipping order placement (no settings to check)")
                 stats["investors_skipped_due_to_settings"] += 1
                 return stats
             
-            # Check if order type conversion is allowed
-            allow_order_type_conversion = settings.get("allow_order_type_conversion", False)
-            
-            # NEW: Check if opposite order restriction is enabled
-            opposite_order_restriction = settings.get("opposite_order_restriction", False)
-            
-            # Get trading parameters
-            max_spread = settings.get("max_spread", 50)
-            max_slippage = settings.get("max_slippage", 20)
-            order_ttl = settings.get("order_ttl", 3600)
-            
-            print(f" [{inv_id}] ✅ Auto trading is ENABLED")
-            print(f"     • Order type conversion: {'ALLOWED' if allow_order_type_conversion else 'NOT ALLOWED'}")
-            print(f"     • Opposite order restriction: {'ENABLED' if opposite_order_restriction else 'DISABLED'}")
-            print(f"     • Max spread: {max_spread} points")
-            print(f"     • Max slippage: {max_slippage} points")
-            print(f"     • Order TTL: {order_ttl} seconds")
-            print(f"     • Pending orders: Will auto-execute when price reaches entry level")
-            
-            stats["investors_processed"] += 1
-            
-        except json.JSONDecodeError as e:
-            print(f" [{inv_id}] ❌ Invalid JSON in accountmanagement.json: {e}")
-            print(f" [{inv_id}] ⏭️ Skipping order placement due to config error")
-            stats["investors_skipped_due_to_settings"] += 1
-            return stats
-        except Exception as e:
-            print(f" [{inv_id}] ❌ Error reading accountmanagement.json: {e}")
-            print(f" [{inv_id}] ⏭️ Skipping order placement due to config error")
-            stats["investors_skipped_due_to_settings"] += 1
-            return stats
-        
-        # Continue with order placement if enabled
-        if not signals_path.exists():
-            print(f" [{inv_id}] ❌ signals.json not found at {signals_path}")
-            return stats
-        
-        try:
-            print(f" [{inv_id}] 📂 Loading signals.json...")
-            with open(signals_path, 'r', encoding='utf-8') as f:
-                signals_data = json.load(f)
-            
-            # Get ALL existing pending orders for this account (no symbol filter)
-            print(f" [{inv_id}] 🔍 Checking ALL existing pending orders...")
-            existing_orders = get_all_existing_pending_orders()
-            stats["total_active_pending"] = len(existing_orders)
-            
-            # Get ALL existing open positions for this account (no symbol filter)
-            print(f" [{inv_id}] 🔍 Checking ALL existing open positions...")
-            existing_positions = get_all_existing_positions()
-            stats["total_open_positions"] = len(existing_positions)
-            
-            print(f" [{inv_id}] 📊 Account summary: {stats['total_active_pending']} pending, {stats['total_open_positions']} positions")
-            
-            # Magic number from investor ID
-            magic_number = int(inv_id) if inv_id.isdigit() else 0
-            
-            # Process each category and symbol
-            for category_name, category_data in signals_data.get('categories', {}).items():
-                symbols_in_category = category_data.get('symbols', {})
+            try:
+                with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                    acc_config = json.load(f)
                 
-                for symbol, symbol_signals in symbols_in_category.items():
-                    stats["symbols_processed"] += 1
+                # Check if auto trading is enabled
+                settings = acc_config.get("settings", {})
+                enable_auto_trading = settings.get("enable_auto_trading", False)
+                
+                if not enable_auto_trading:
+                    print(f" [{inv_id}] ⏭️ Auto trading is DISABLED in accountmanagement.json")
+                    print(f"     (settings.enable_auto_trading = false)")
+                    stats["investors_skipped_due_to_settings"] += 1
+                    return stats
+                
+                # Check if order type conversion is allowed
+                allow_order_type_conversion = settings.get("allow_order_type_conversion", False)
+                
+                # Check if opposite order restriction is enabled
+                opposite_order_restriction = settings.get("opposite_order_restriction", False)
+                
+                # Get trading parameters
+                max_spread = settings.get("max_spread", 50)
+                max_slippage = settings.get("max_slippage", 20)
+                order_ttl = settings.get("order_ttl", 3600)
+                
+                print(f" [{inv_id}] ✅ Auto trading is ENABLED")
+                print(f"     • Order type conversion: {'ALLOWED' if allow_order_type_conversion else 'NOT ALLOWED'}")
+                print(f"     • Opposite order restriction: {'ENABLED' if opposite_order_restriction else 'DISABLED'}")
+                print(f"     • Max spread: {max_spread} points")
+                print(f"     • Max slippage: {max_slippage} points")
+                print(f"     • Order TTL: {order_ttl} seconds")
+                print(f"     • Pending orders: Will auto-execute when price reaches entry level")
+                
+                stats["investors_processed"] += 1
+                
+            except json.JSONDecodeError as e:
+                print(f" [{inv_id}] ❌ Invalid JSON in accountmanagement.json: {e}")
+                print(f" [{inv_id}] ⏭️ Skipping order placement due to config error")
+                stats["investors_skipped_due_to_settings"] += 1
+                return stats
+            except Exception as e:
+                print(f" [{inv_id}] ❌ Error reading accountmanagement.json: {e}")
+                print(f" [{inv_id}] ⏭️ Skipping order placement due to config error")
+                stats["investors_skipped_due_to_settings"] += 1
+                return stats
+            
+            # Continue with order placement if enabled
+            if not signals_path.exists():
+                print(f" [{inv_id}] ❌ signals.json not found at {signals_path}")
+                return stats
+            
+            try:
+                print(f" [{inv_id}] 📂 Loading signals.json...")
+                with open(signals_path, 'r', encoding='utf-8') as f:
+                    signals_data = json.load(f)
+                
+                # Get ALL existing pending orders for this account (no symbol filter)
+                print(f" [{inv_id}] 🔍 Checking ALL existing pending orders...")
+                existing_orders = get_all_existing_pending_orders()
+                stats["total_active_pending"] = len(existing_orders)
+                
+                # Get ALL existing open positions for this account (no symbol filter)
+                print(f" [{inv_id}] 🔍 Checking ALL existing open positions...")
+                existing_positions = get_all_existing_positions()
+                stats["total_open_positions"] = len(existing_positions)
+                
+                print(f" [{inv_id}] 📊 Account summary: {stats['total_active_pending']} pending, {stats['total_open_positions']} positions")
+                
+                # Magic number from investor ID
+                magic_number = int(inv_id) if inv_id.isdigit() else 0
+                
+                # Process each category and symbol
+                for category_name, category_data in signals_data.get('categories', {}).items():
+                    symbols_in_category = category_data.get('symbols', {})
                     
-                    print(f"\n    🔍 Processing {symbol} for order placement:")
-                    
-                    # Initialize symbol details
-                    symbol_detail = {
-                        "symbol": symbol,
-                        "category": category_name,
-                        "orders_attempted": 0,
-                        "orders_placed": 0,
-                        "orders_converted": 0,
-                        "orders_conversion_skipped_permission": 0,
-                        "orders_skipped_pending": 0,
-                        "orders_skipped_position": 0,
-                        "orders_skipped_too_close_same": 0,
-                        "orders_skipped_too_close_opposite": 0,
-                        "orders_failed": 0,
-                        "orders_cancelled_during_regulation": 0,
-                        "main_orders_placed": 0,
-                        "counter_orders_placed": 0,
-                        "counter_orders_skipped": 0,
-                        "counter_orders_failed": 0,
-                        "errors": []
-                    }
-                    
-                    # Check spread for this symbol
-                    symbol_info = mt5.symbol_info(symbol)
-                    if symbol_info:
-                        current_spread = symbol_info.spread
-                        print(f"      📊 Current spread for {symbol}: {current_spread} points")
+                    for symbol, symbol_signals in symbols_in_category.items():
+                        stats["symbols_processed"] += 1
                         
-                        if current_spread > max_spread:
-                            print(f"      ⚠️ Spread {current_spread} exceeds max allowed {max_spread} - may affect order placement")
-                    
-                    # Get current prices for reference
-                    bid, ask = get_current_price(symbol)
-                    if bid and ask:
-                        print(f"      💵 Current prices - Bid: {bid:.2f}, Ask: {ask:.2f}")
-                    
-                    # COLLECT ALL ORDERS FROM BOTH ARRAYS - INCLUDING COUNTERS
-                    all_orders_to_process = []
-                    pending_orders_to_keep = set()  # Track orders that should be kept for regulation
-                    
-                    # Helper function to add an order to processing list
-                    def add_order_to_process(order_obj, source, is_counter_val):
-                        all_orders_to_process.append({
-                            'order': order_obj,
-                            'source': source,
-                            'is_counter': is_counter_val
-                        })
+                        print(f"\n    🔍 Processing {symbol} for order placement:")
                         
-                        # Generate key for regulation
-                        ord_type = order_obj.get('order_type', '')
-                        ord_entry = order_obj.get('entry', 0)
-                        ord_volume = round(order_obj.get('volume', 0.01), 2)
-                        mt5_type = None
-                        if ord_type == 'buy_stop':
-                            mt5_type = mt5.ORDER_TYPE_BUY_STOP
-                        elif ord_type == 'buy_limit':
-                            mt5_type = mt5.ORDER_TYPE_BUY_LIMIT
-                        elif ord_type == 'sell_stop':
-                            mt5_type = mt5.ORDER_TYPE_SELL_STOP
-                        elif ord_type == 'sell_limit':
-                            mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
+                        # Initialize symbol details
+                        symbol_detail = {
+                            "symbol": symbol,
+                            "category": category_name,
+                            "orders_attempted": 0,
+                            "orders_placed": 0,
+                            "orders_converted": 0,
+                            "orders_conversion_skipped_permission": 0,
+                            "orders_skipped_pending": 0,
+                            "orders_skipped_position": 0,
+                            "orders_skipped_too_close_same": 0,
+                            "orders_skipped_too_close_opposite": 0,
+                            "orders_failed": 0,
+                            "orders_cancelled_during_regulation": 0,
+                            "main_orders_placed": 0,
+                            "counter_orders_placed": 0,
+                            "counter_orders_skipped": 0,
+                            "counter_orders_failed": 0,
+                            "errors": []
+                        }
                         
-                        if mt5_type:
-                            pending_orders_to_keep.add(f"{symbol}_{mt5_type}_{ord_entry}_{ord_volume}")
-                    
-                    # Process bid_orders
-                    bid_orders = symbol_signals.get('bid_orders', [])
-                    for order in bid_orders:
-                        # Add main bid order
-                        add_order_to_process(order, 'bid_orders', False)
-                        
-                        # Add counter order if present
-                        if 'order_counter' in order and order['order_counter']:
-                            add_order_to_process(order['order_counter'], 'bid_orders_counter', True)
-                    
-                    # Process ask_orders
-                    ask_orders = symbol_signals.get('ask_orders', [])
-                    for order in ask_orders:
-                        # Add main ask order
-                        add_order_to_process(order, 'ask_orders', False)
-                        
-                        # Add counter order if present
-                        if 'order_counter' in order and order['order_counter']:
-                            add_order_to_process(order['order_counter'], 'ask_orders_counter', True)
-                    
-                    print(f"      📦 Found {len(all_orders_to_process)} total orders to process (including counters)")
-                    
-                    # =====================================================
-                    # STEP 2: Regulate and authorize orders
-                    # =====================================================
-                    print(f"      🧹 Regulating pending orders for {symbol}...")
-                    cancelled_count = regulate_and_authorize_orders(symbol, pending_orders_to_keep, magic_number)
-                    symbol_detail["orders_cancelled_during_regulation"] = cancelled_count
-                    stats["orders_cancelled_during_regulation"] += cancelled_count
-                    
-                    # Process ALL orders (main and counter) in a single pass
-                    for idx, order_info in enumerate(all_orders_to_process):
-                        order = order_info['order']
-                        is_counter = order_info['is_counter']
-                        
-                        stats["orders_attempted"] += 1
-                        symbol_detail["orders_attempted"] += 1
-                        
-                        # Process the order with opposite restriction setting
-                        success, result, error, was_skipped, skip_reason, was_converted, final_price, check_type = process_single_order(
-                            order, symbol, magic_number, existing_orders, existing_positions, 
-                            is_counter, allow_order_type_conversion, opposite_order_restriction
-                        )
-                        
-                        if was_skipped:
-                            if skip_reason == 'pending':
-                                stats["orders_skipped_duplicate_pending"] += 1
-                                symbol_detail["orders_skipped_pending"] += 1
-                            elif skip_reason == 'position':
-                                stats["orders_skipped_duplicate_position"] += 1
-                                symbol_detail["orders_skipped_position"] += 1
-                            elif skip_reason == 'too_close_same':
-                                stats["orders_skipped_too_close_same_direction"] += 1
-                                symbol_detail["orders_skipped_too_close_same"] += 1
-                            elif skip_reason == 'too_close_opposite':
-                                stats["orders_skipped_too_close_opposite_direction"] += 1
-                                symbol_detail["orders_skipped_too_close_opposite"] += 1
+                        # Check spread for this symbol
+                        symbol_info = mt5.symbol_info(symbol)
+                        if symbol_info:
+                            current_spread = symbol_info.spread
+                            print(f"      📊 Current spread for {symbol}: {current_spread} points")
                             
-                            # Track counter order skips separately
-                            if is_counter:
-                                stats["counter_orders_skipped"] += 1
-                                symbol_detail["counter_orders_skipped"] += 1
+                            if current_spread > max_spread:
+                                print(f"      ⚠️ Spread {current_spread} exceeds max allowed {max_spread} - may affect order placement")
+                        
+                        # Get current prices for reference
+                        bid, ask = get_current_price(symbol)
+                        if bid and ask:
+                            print(f"      💵 Current prices - Bid: {bid:.2f}, Ask: {ask:.2f}")
+                        
+                        # COLLECT ALL ORDERS FROM BOTH ARRAYS - INCLUDING COUNTERS
+                        all_orders_to_process = []
+                        pending_orders_to_keep = set()  # Track orders that should be kept for regulation
+                        
+                        # Helper function to add an order to processing list
+                        def add_order_to_process(order_obj, source, is_counter_val):
+                            all_orders_to_process.append({
+                                'order': order_obj,
+                                'source': source,
+                                'is_counter': is_counter_val
+                            })
                             
-                        elif success:
-                            stats["orders_placed"] += 1
-                            symbol_detail["orders_placed"] += 1
+                            # Generate key for regulation
+                            ord_type = order_obj.get('order_type', '')
+                            ord_entry = order_obj.get('entry', 0)
+                            ord_volume = round(order_obj.get('volume', 0.01), 2)
+                            mt5_type = None
+                            if ord_type == 'buy_stop':
+                                mt5_type = mt5.ORDER_TYPE_BUY_STOP
+                            elif ord_type == 'buy_limit':
+                                mt5_type = mt5.ORDER_TYPE_BUY_LIMIT
+                            elif ord_type == 'sell_stop':
+                                mt5_type = mt5.ORDER_TYPE_SELL_STOP
+                            elif ord_type == 'sell_limit':
+                                mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
                             
-                            if was_converted:
-                                stats["orders_converted_and_placed"] += 1
-                                symbol_detail["orders_converted"] += 1
+                            if mt5_type:
+                                pending_orders_to_keep.add(f"{symbol}_{mt5_type}_{ord_entry}_{ord_volume}")
+                        
+                        # Process bid_orders
+                        bid_orders = symbol_signals.get('bid_orders', [])
+                        for order in bid_orders:
+                            # Add main bid order
+                            add_order_to_process(order, 'bid_orders', False)
                             
-                            if is_counter:
-                                stats["counter_orders_placed"] += 1
-                                symbol_detail["counter_orders_placed"] += 1
+                            # Add counter order if present
+                            if 'order_counter' in order and order['order_counter']:
+                                add_order_to_process(order['order_counter'], 'bid_orders_counter', True)
+                        
+                        # Process ask_orders
+                        ask_orders = symbol_signals.get('ask_orders', [])
+                        for order in ask_orders:
+                            # Add main ask order
+                            add_order_to_process(order, 'ask_orders', False)
+                            
+                            # Add counter order if present
+                            if 'order_counter' in order and order['order_counter']:
+                                add_order_to_process(order['order_counter'], 'ask_orders_counter', True)
+                        
+                        print(f"      📦 Found {len(all_orders_to_process)} total orders to process (including counters)")
+                        
+                        # =====================================================
+                        # STEP 3: Regulate and authorize orders
+                        # =====================================================
+                        print(f"      🧹 Regulating pending orders for {symbol}...")
+                        cancelled_count = regulate_and_authorize_orders(symbol, pending_orders_to_keep, magic_number)
+                        symbol_detail["orders_cancelled_during_regulation"] = cancelled_count
+                        stats["orders_cancelled_during_regulation"] += cancelled_count
+                        
+                        # Process ALL orders (main and counter) in a single pass
+                        for idx, order_info in enumerate(all_orders_to_process):
+                            order = order_info['order']
+                            is_counter = order_info['is_counter']
+                            
+                            stats["orders_attempted"] += 1
+                            symbol_detail["orders_attempted"] += 1
+                            
+                            # Process the order with opposite restriction setting
+                            success, result, error, was_skipped, skip_reason, was_converted, final_price, check_type = process_single_order(
+                                order, symbol, magic_number, existing_orders, existing_positions, 
+                                is_counter, allow_order_type_conversion, opposite_order_restriction
+                            )
+                            
+                            if was_skipped:
+                                if skip_reason == 'pending':
+                                    stats["orders_skipped_duplicate_pending"] += 1
+                                    symbol_detail["orders_skipped_pending"] += 1
+                                elif skip_reason == 'position':
+                                    stats["orders_skipped_duplicate_position"] += 1
+                                    symbol_detail["orders_skipped_position"] += 1
+                                elif skip_reason == 'too_close_same':
+                                    stats["orders_skipped_too_close_same_direction"] += 1
+                                    symbol_detail["orders_skipped_too_close_same"] += 1
+                                elif skip_reason == 'too_close_opposite':
+                                    stats["orders_skipped_too_close_opposite_direction"] += 1
+                                    symbol_detail["orders_skipped_too_close_opposite"] += 1
+                                
+                                # Track counter order skips separately
+                                if is_counter:
+                                    stats["counter_orders_skipped"] += 1
+                                    symbol_detail["counter_orders_skipped"] += 1
+                                
+                            elif success:
+                                stats["orders_placed"] += 1
+                                symbol_detail["orders_placed"] += 1
+                                
+                                if was_converted:
+                                    stats["orders_converted_and_placed"] += 1
+                                    symbol_detail["orders_converted"] += 1
+                                
+                                if is_counter:
+                                    stats["counter_orders_placed"] += 1
+                                    symbol_detail["counter_orders_placed"] += 1
+                                else:
+                                    stats["main_orders_placed"] += 1
+                                    symbol_detail["main_orders_placed"] += 1
+                                
+                                # Map order type string to MT5 order type for the key
+                                order_type = order.get('order_type', '')
+                                mt5_pending_type = None
+                                
+                                if order_type == 'buy_stop':
+                                    mt5_pending_type = mt5.ORDER_TYPE_BUY_STOP
+                                elif order_type == 'buy_limit':
+                                    mt5_pending_type = mt5.ORDER_TYPE_BUY_LIMIT
+                                elif order_type == 'sell_stop':
+                                    mt5_pending_type = mt5.ORDER_TYPE_SELL_STOP
+                                elif order_type == 'sell_limit':
+                                    mt5_pending_type = mt5.ORDER_TYPE_SELL_LIMIT
+                                
+                                # Round volume for key
+                                volume_rounded = round(order.get('volume', 0.01), 2)
+                                
+                                # Add to existing_orders to prevent duplicate placement in same run
+                                if mt5_pending_type:
+                                    pending_key = f"{symbol}_{mt5_pending_type}_{final_price}_{volume_rounded}"
+                                    existing_orders[pending_key] = {
+                                        'ticket': result.order,
+                                        'symbol': symbol,
+                                        'type': mt5_pending_type,
+                                        'price': final_price,
+                                        'volume': volume_rounded,
+                                        'type_string': "PENDING"
+                                    }
+                                    print(f"          🔒 Added to duplicate prevention cache: {pending_key}")
+                                
                             else:
-                                stats["main_orders_placed"] += 1
-                                symbol_detail["main_orders_placed"] += 1
-                            
-                            # Map order type string to MT5 order type for the key
-                            order_type = order.get('order_type', '')
-                            mt5_pending_type = None
-                            
-                            if order_type == 'buy_stop':
-                                mt5_pending_type = mt5.ORDER_TYPE_BUY_STOP
-                            elif order_type == 'buy_limit':
-                                mt5_pending_type = mt5.ORDER_TYPE_BUY_LIMIT
-                            elif order_type == 'sell_stop':
-                                mt5_pending_type = mt5.ORDER_TYPE_SELL_STOP
-                            elif order_type == 'sell_limit':
-                                mt5_pending_type = mt5.ORDER_TYPE_SELL_LIMIT
-                            
-                            # Round volume for key
-                            volume_rounded = round(order.get('volume', 0.01), 2)
-                            
-                            # Add to existing_orders to prevent duplicate placement in same run
-                            if mt5_pending_type:
-                                pending_key = f"{symbol}_{mt5_pending_type}_{final_price}_{volume_rounded}"
-                                existing_orders[pending_key] = {
-                                    'ticket': result.order,
-                                    'symbol': symbol,
-                                    'type': mt5_pending_type,
-                                    'price': final_price,
-                                    'volume': volume_rounded,
-                                    'type_string': "PENDING"
-                                }
-                                print(f"          🔒 Added to duplicate prevention cache: {pending_key}")
-                            
-                        else:
-                            stats["orders_failed"] += 1
-                            symbol_detail["orders_failed"] += 1
-                            
-                            if is_counter:
-                                stats["counter_orders_failed"] += 1
-                                symbol_detail["counter_orders_failed"] += 1
-                            
-                            # Track if failure was due to conversion not being allowed
-                            if error and "conversion is NOT ALLOWED" in error:
-                                stats["orders_conversion_skipped_permission"] += 1
-                                symbol_detail["orders_conversion_skipped_permission"] += 1
-                            
-                            if error:
-                                symbol_detail["errors"].append(f"{'Counter' if is_counter else 'Main'} order {idx+1}: {error}")
-                    
-                    # Store symbol details
-                    stats["symbol_details"][symbol] = symbol_detail
+                                stats["orders_failed"] += 1
+                                symbol_detail["orders_failed"] += 1
+                                
+                                if is_counter:
+                                    stats["counter_orders_failed"] += 1
+                                    symbol_detail["counter_orders_failed"] += 1
+                                
+                                # Track if failure was due to conversion not being allowed
+                                if error and "conversion is NOT ALLOWED" in error:
+                                    stats["orders_conversion_skipped_permission"] += 1
+                                    symbol_detail["orders_conversion_skipped_permission"] += 1
+                                
+                                if error:
+                                    symbol_detail["errors"].append(f"{'Counter' if is_counter else 'Main'} order {idx+1}: {error}")
+                        
+                        # Store symbol details
+                        stats["symbol_details"][symbol] = symbol_detail
+                
+                # Print summary
+                print(f"\n  📊 ORDER PLACEMENT SUMMARY:")
+                print(f"    • Upload Orders Flag: {stats['upload_orders_flag']}")
+                print(f"    • Investors skipped due to position flag: {stats['investors_skipped_due_to_position_flag']}")
+                print(f"    • Symbols processed: {stats['symbols_processed']}")
+                print(f"    • Total orders attempted: {stats['orders_attempted']}")
+                print(f"    • Orders placed: {stats['orders_placed']}")
+                print(f"      - Main orders: {stats['main_orders_placed']}")
+                print(f"      - Counter orders: {stats['counter_orders_placed']}")
+                print(f"      - Converted orders: {stats['orders_converted_and_placed']}")
+                print(f"    • Counter orders skipped: {stats.get('counter_orders_skipped', 0)}")
+                print(f"    • Counter orders failed: {stats['counter_orders_failed']}")
+                print(f"    • Orders cancelled during regulation: {stats['orders_cancelled_during_regulation']}")
+                print(f"    • Orders skipped (duplicate pending): {stats['orders_skipped_duplicate_pending']}")
+                print(f"    • Orders skipped (duplicate position): {stats['orders_skipped_duplicate_position']}")
+                print(f"    • Orders skipped (too close - same direction): {stats.get('orders_skipped_too_close_same_direction', 0)}")
+                print(f"    • Orders skipped (too close - opposite direction): {stats.get('orders_skipped_too_close_opposite_direction', 0)}")
+                print(f"    • Orders conversion skipped (permission denied): {stats['orders_conversion_skipped_permission']}")
+                print(f"    • Orders failed: {stats['orders_failed']}")
+                print(f"    • Total active pending orders: {stats['total_active_pending']}")
+                print(f"    • Total open positions: {stats['total_open_positions']}")
+                
+                if stats['orders_failed'] > 0:
+                    print(f"\n  ❌ FAILED ORDER DETAILS:")
+                    for symbol, detail in stats["symbol_details"].items():
+                        if detail["orders_failed"] > 0:
+                            print(f"    • {symbol}: {detail['orders_failed']} failures")
+                            for error in detail["errors"][:5]:
+                                print(f"        • {error}")
+                
+            except Exception as e:
+                print(f" [{inv_id}] ❌ Error in order placement: {e}")
+                import traceback
+                traceback.print_exc()
+                stats["placement_errors"].append(str(e))
+        
+        return stats
+    
+    return main()
+
+def manage_single_position_and_pending(inv_id=None):
+    """
+    Function: Manages positions and pending orders to ensure only one position exists
+    and only the closest opposite pending order remains.
+    
+    If enable_single_position_and_pending is True:
+    - For a SELL position: Keeps only the closest BUY order (either LIMIT or STOP)
+    - For a BUY position: Keeps only the closest SELL order (either LIMIT or STOP)
+    - Deletes all other pending orders
+    
+    Args:
+        inv_id: Optional specific investor ID to process. If None, processes all investors.
+        
+    Returns:
+        dict: Statistics about the processing including 'upload_orders' flag
+    """
+    print(f"\n{'='*10} 🎯 SINGLE POSITION & PENDING ORDER MANAGEMENT {'='*10}")
+    if inv_id:
+        print(f" Processing single investor: {inv_id}")
+
+    # Track statistics
+    stats = {
+        "investor_id": inv_id if inv_id else "all",
+        "investors_processed": 0,
+        "positions_found": 0,
+        "pending_orders_found": 0,
+        "orders_kept": 0,
+        "orders_deleted": 0,
+        "errors": 0,
+        "processing_success": False,
+        "upload_orders": True  # Default to True, will be set to False only if conditions are met
+    }
+
+    # Determine which investors to process
+    investors_to_process = [inv_id] if inv_id else usersdictionary.keys()
+    total_investors = len(investors_to_process) if not inv_id else 1
+    processed = 0
+
+    for user_brokerid in investors_to_process:
+        processed += 1
+        print(f"\n[{processed}/{total_investors}] {user_brokerid} 🔍 Checking single position/pending configuration...")
+        
+        # Get broker config
+        broker_cfg = usersdictionary.get(user_brokerid)
+        if not broker_cfg:
+            print(f"  └─ ❌ No broker config found")
+            continue
+        
+        inv_root = Path(INV_PATH) / user_brokerid
+        acc_mgmt_path = inv_root / "accountmanagement.json"
+
+        if not acc_mgmt_path.exists():
+            print(f"  └─ ⚠️  Account config missing. Skipping.")
+            continue
+
+        # --- LOAD CONFIG AND CHECK SETTINGS ---
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
             
-            # Print summary
-            print(f"\n  📊 ORDER PLACEMENT SUMMARY:")
-            print(f"    • Symbols processed: {stats['symbols_processed']}")
-            print(f"    • Total orders attempted: {stats['orders_attempted']}")
-            print(f"    • Orders placed: {stats['orders_placed']}")
-            print(f"      - Main orders: {stats['main_orders_placed']}")
-            print(f"      - Counter orders: {stats['counter_orders_placed']}")
-            print(f"      - Converted orders: {stats['orders_converted_and_placed']}")
-            print(f"    • Counter orders skipped: {stats.get('counter_orders_skipped', 0)}")
-            print(f"    • Counter orders failed: {stats['counter_orders_failed']}")
-            print(f"    • Orders cancelled during regulation: {stats['orders_cancelled_during_regulation']}")
-            print(f"    • Orders skipped (duplicate pending): {stats['orders_skipped_duplicate_pending']}")
-            print(f"    • Orders skipped (duplicate position): {stats['orders_skipped_duplicate_position']}")
-            print(f"    • Orders skipped (too close - same direction): {stats.get('orders_skipped_too_close_same_direction', 0)}")
-            print(f"    • Orders skipped (too close - opposite direction): {stats.get('orders_skipped_too_close_opposite_direction', 0)}")
-            print(f"    • Orders conversion skipped (permission denied): {stats['orders_conversion_skipped_permission']}")
-            print(f"    • Orders failed: {stats['orders_failed']}")
-            print(f"    • Total active pending orders: {stats['total_active_pending']}")
-            print(f"    • Total open positions: {stats['total_open_positions']}")
+            # Check if single position and pending management is enabled
+            settings = config.get("settings", {})
+            if not settings.get("enable_single_position_and_pending", False):
+                print(f"  └─ ⏭️  Single position/pending management disabled in settings. Skipping.")
+                continue
             
-            if stats['orders_failed'] > 0:
-                print(f"\n  ❌ FAILED ORDER DETAILS:")
-                for symbol, detail in stats["symbol_details"].items():
-                    if detail["orders_failed"] > 0:
-                        print(f"    • {symbol}: {detail['orders_failed']} failures")
-                        for error in detail["errors"][:5]:
-                            print(f"        • {error}")
+            print(f"  └─ ✅ Single position/pending management ENABLED")
             
         except Exception as e:
-            print(f" [{inv_id}] ❌ Error in order placement: {e}")
-            import traceback
-            traceback.print_exc()
-            stats["placement_errors"].append(str(e))
+            print(f"  └─ ❌ Failed to read config: {e}")
+            stats["errors"] += 1
+            continue
+
+        # --- ACCOUNT INITIALIZATION ---
+        print(f"  └─ 🔌 Initializing account connection...")
+        
+        login_id = int(broker_cfg['LOGIN_ID'])
+        mt5_path = broker_cfg["TERMINAL_PATH"]
+        
+        print(f"      • Terminal Path: {mt5_path}")
+        print(f"      • Login ID: {login_id}")
+
+        # Initialize MT5 connection if needed
+        if not mt5.initialize(path=mt5_path):
+            print(f"  └─ ❌ MT5 initialization failed")
+            stats["errors"] += 1
+            continue
+
+        # Check login status
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            print(f"      🔑 Logging into account...")
+            if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
+                error = mt5.last_error()
+                print(f"  └─ ❌ Login failed: {error}")
+                stats["errors"] += 1
+                continue
+            print(f"      ✅ Successfully logged into account")
+        else:
+            print(f"      ✅ Already logged into account")
+
+        # --- GET ALL POSITIONS ---
+        positions = mt5.positions_get()
+        pending_orders = mt5.orders_get()
+        
+        stats["investors_processed"] += 1
+        stats["positions_found"] += len(positions) if positions else 0
+        stats["pending_orders_found"] += len(pending_orders) if pending_orders else 0
+        
+        # Determine upload_orders flag based on the situation
+        # Set upload_orders = True when:
+        # 1. No position exists
+        # 2. Position exists but no opposite order close to it (missing)
+        # Set upload_orders = False only when: position exists AND there's an order close to it
+        
+        if not positions or len(positions) == 0:
+            print(f"\n  └─ 📊 No open positions found.")
+            print(f"  └─ 🚩 upload_orders = True (no position found)")
+            stats["upload_orders"] = True
+            stats["processing_success"] = True
+            continue
+        
+        # If multiple positions exist, log warning but still process
+        if len(positions) > 1:
+            print(f"\n  └─ ⚠️  WARNING: Found {len(positions)} open positions!")
+            print(f"      This function expects a single position. Processing based on the first position only.")
+        
+        # Get the first position (should only be one ideally)
+        position = positions[0]
+        
+        # Determine position type
+        is_buy_position = position.type == mt5.POSITION_TYPE_BUY
+        position_type_str = "BUY" if is_buy_position else "SELL"
+        
+        print(f"\n  └─ 📊 Position Found:")
+        print(f"      • Ticket: {position.ticket}")
+        print(f"      • Symbol: {position.symbol}")
+        print(f"      • Type: {position_type_str}")
+        print(f"      • Volume: {position.volume}")
+        print(f"      • Entry Price: {position.price_open}")
+        print(f"      • Current Price: {position.price_current}")
+        
+        # If no pending orders, nothing to manage
+        if not pending_orders or len(pending_orders) == 0:
+            print(f"\n  └─ 📊 No pending orders found.")
+            print(f"  └─ 🚩 upload_orders = True (position exists but no pending orders)")
+            stats["upload_orders"] = True
+            stats["processing_success"] = True
+            continue
+        
+        # Filter pending orders for the same symbol as the position
+        same_symbol_orders = [order for order in pending_orders if order.symbol == position.symbol]
+        
+        if not same_symbol_orders:
+            print(f"\n  └─ 📊 No pending orders for symbol {position.symbol}.")
+            print(f"  └─ 🚩 upload_orders = True (position exists but no pending orders for this symbol)")
+            stats["upload_orders"] = True
+            stats["processing_success"] = True
+            continue
+        
+        print(f"\n  └─ 📊 Found {len(same_symbol_orders)} pending orders for symbol {position.symbol}")
+        
+        # Define opposite order types based on position direction
+        # For BUY position: we want to keep the closest SELL order (LIMIT or STOP)
+        # For SELL position: we want to keep the closest BUY order (LIMIT or STOP)
+        
+        opposite_orders = []
+        
+        if is_buy_position:
+            # For BUY position, keep SELL orders (both LIMIT and STOP)
+            for order in same_symbol_orders:
+                if order.type in [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]:
+                    opposite_orders.append(order)
+            print(f"      • Found {len(opposite_orders)} SELL orders (opposite to BUY position)")
+        else:
+            # For SELL position, keep BUY orders (both LIMIT and STOP)
+            for order in same_symbol_orders:
+                if order.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP]:
+                    opposite_orders.append(order)
+            print(f"      • Found {len(opposite_orders)} BUY orders (opposite to SELL position)")
+        
+        if not opposite_orders:
+            print(f"\n  └─ 📊 No opposite orders found.")
+            print(f"  └─ 🚩 upload_orders = True (position exists but no opposite orders found)")
+            stats["upload_orders"] = True
+            # Delete all pending orders since no opposite orders exist
+            orders_to_delete = same_symbol_orders
+        else:
+            # Find the closest opposite order to the current price
+            current_price = position.price_current
+            
+            if is_buy_position:
+                # For BUY position, find the SELL order with price closest to current price
+                # For SELL orders, we want orders below current price (typically)
+                # But we'll find the closest regardless of direction
+                closest_order = min(opposite_orders, key=lambda o: abs(o.price_open - current_price))
+                print(f"\n  └─ 🎯 Closest opposite order found:")
+                print(f"      • Ticket: {closest_order.ticket}")
+                print(f"      • Type: {'SELL LIMIT' if closest_order.type == mt5.ORDER_TYPE_SELL_LIMIT else 'SELL STOP'}")
+                print(f"      • Price: {closest_order.price_open}")
+                print(f"      • Distance from current price: {abs(closest_order.price_open - current_price):.5f}")
+                
+                # Keep this order, delete all others
+                orders_to_keep = [closest_order]
+                orders_to_delete = [o for o in same_symbol_orders if o.ticket != closest_order.ticket]
+            else:
+                # For SELL position, find the BUY order with price closest to current price
+                # For BUY orders, we want orders above current price (typically)
+                closest_order = min(opposite_orders, key=lambda o: abs(o.price_open - current_price))
+                print(f"\n  └─ 🎯 Closest opposite order found:")
+                print(f"      • Ticket: {closest_order.ticket}")
+                print(f"      • Type: {'BUY LIMIT' if closest_order.type == mt5.ORDER_TYPE_BUY_LIMIT else 'BUY STOP'}")
+                print(f"      • Price: {closest_order.price_open}")
+                print(f"      • Distance from current price: {abs(closest_order.price_open - current_price):.5f}")
+                
+                # Keep this order, delete all others
+                orders_to_keep = [closest_order]
+                orders_to_delete = [o for o in same_symbol_orders if o.ticket != closest_order.ticket]
+            
+            # Since we found a valid opposite order close to the position, set upload_orders = False
+            stats["upload_orders"] = False
+            print(f"\n  └─ 🚩 upload_orders = False (position exists with opposite order close by)")
+        
+        # Delete orders that are not the closest opposite order
+        if orders_to_delete:
+            print(f"\n  └─ 🗑️  Deleting {len(orders_to_delete)} pending order(s)...")
+            
+            for order in orders_to_delete:
+                order_type_name = "UNKNOWN"
+                if order.type == mt5.ORDER_TYPE_BUY_LIMIT:
+                    order_type_name = "BUY LIMIT"
+                elif order.type == mt5.ORDER_TYPE_SELL_LIMIT:
+                    order_type_name = "SELL LIMIT"
+                elif order.type == mt5.ORDER_TYPE_BUY_STOP:
+                    order_type_name = "BUY STOP"
+                elif order.type == mt5.ORDER_TYPE_SELL_STOP:
+                    order_type_name = "SELL STOP"
+                
+                print(f"      • Deleting order #{order.ticket} ({order_type_name} @ {order.price_open})...")
+                
+                # Prepare delete request
+                delete_request = {
+                    "action": mt5.TRADE_ACTION_REMOVE,
+                    "order": order.ticket,
+                }
+                
+                # Send delete request
+                result = mt5.order_send(delete_request)
+                
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    stats["orders_deleted"] += 1
+                    print(f"        ✅ Deleted successfully")
+                else:
+                    stats["errors"] += 1
+                    error_msg = result.comment if result else f"Error code: {result.retcode if result else 'Unknown'}"
+                    print(f"        ❌ Deletion failed: {error_msg}")
+        
+        # Keep track of kept orders
+        if 'orders_to_keep' in locals() and orders_to_keep:
+            stats["orders_kept"] += len(orders_to_keep)
+            print(f"\n  └─ ✅ Kept {len(orders_to_keep)} order(s):")
+            for order in orders_to_keep:
+                order_type_name = "UNKNOWN"
+                if order.type == mt5.ORDER_TYPE_BUY_LIMIT:
+                    order_type_name = "BUY LIMIT"
+                elif order.type == mt5.ORDER_TYPE_SELL_LIMIT:
+                    order_type_name = "SELL LIMIT"
+                elif order.type == mt5.ORDER_TYPE_BUY_STOP:
+                    order_type_name = "BUY STOP"
+                elif order.type == mt5.ORDER_TYPE_SELL_STOP:
+                    order_type_name = "SELL STOP"
+                print(f"        • Order #{order.ticket} ({order_type_name} @ {order.price_open})")
+        
+        stats["processing_success"] = True
+        
+        # --- INVESTOR SUMMARY ---
+        print(f"\n  └─ 📊 Management Results for {user_brokerid}:")
+        print(f"      • Position: {position_type_str} {position.symbol}")
+        print(f"      • Opposite orders found: {len(opposite_orders)}")
+        print(f"      • Orders kept: {stats['orders_kept']}")
+        print(f"      • Orders deleted: {stats['orders_deleted']}")
+        print(f"      • upload_orders flag: {stats['upload_orders']}")
+        if stats['errors'] > 0:
+            print(f"      • Errors: {stats['errors']}")
+        else:
+            print(f"      ✅ Management completed successfully")
+
+    # --- FINAL SUMMARY ---
+    print(f"\n{'='*10} 📊 SINGLE POSITION & PENDING ORDER MANAGEMENT SUMMARY {'='*10}")
+    print(f"   Investor ID: {stats['investor_id']}")
+    print(f"   Investors processed: {stats['investors_processed']}")
+    print(f"   Total positions found: {stats['positions_found']}")
+    print(f"   Total pending orders found: {stats['pending_orders_found']}")
+    print(f"   Orders kept: {stats['orders_kept']}")
+    print(f"   Orders deleted: {stats['orders_deleted']}")
+    print(f"   Errors: {stats['errors']}")
+    print(f"   FINAL upload_orders flag: {stats['upload_orders']}")
     
+    if stats['orders_deleted'] > 0 or stats['orders_kept'] > 0:
+        print(f"\n   Management Action: {'✅ COMPLETED' if stats['processing_success'] else '⚠️  PARTIAL'}")
+    else:
+        print(f"\n   Management Action: ℹ️  No action needed")
+    
+    print(f"\n{'='*10} 🏁 SINGLE POSITION & PENDING ORDER MANAGEMENT COMPLETE {'='*10}\n")
     return stats
 
 def check_pending_orders_risk(inv_id=None):
@@ -12136,7 +11344,9 @@ def process_single_investor(inv_folder):
         
 
         # STEP 2: ORDER PLACEMENT
+        order_stats = manage_single_position_and_pending(inv_id=inv_id)
         order_stats = place_signals_orders_accounts(inv_id=inv_id)
+        order_stats = manage_single_position_and_pending(inv_id=inv_id)
         apply_dynamic_breakeven(inv_id=inv_id)
         account_stats["order_placement_stats"] = order_stats
         account_stats["orders_placed"] = order_stats.get("orders_placed", 0)
@@ -12166,7 +11376,6 @@ def process_single_investor(inv_folder):
             pass
     
     return account_stats
-
 
 def place_grid_orders_parallel():
     """
