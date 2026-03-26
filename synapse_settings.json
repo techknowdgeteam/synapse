@@ -19,6 +19,14 @@
         "ask_prices_order_type":"sell_stop"
     },
     "settings": {
+        "martingale_config":{
+            "enable_martingale": true,
+            "maximum_martingale_lookback": 5,
+            "martingale_days_lookback": 2,
+            "martingale_for_position_order_scale": true,
+            "martingale_pre_scaling": true,
+            "martingale_loss_recovery_adder_percentage": "10%"
+        },
         "enable_auto_trading": true,
         "place_grid_trades": true,
         "enable_breakeven": true,
@@ -105,10 +113,6 @@
         "enable_liquidator_configuration": false,
         "enable_order_type_conversion": false,
         "enable_martingale": true,
-        "maximum_martingale_lookback": 3,
-        "martingale_for_position_order_scale": true,
-        "martingale_pre_scaling": true,
-        "martingale_loss_recovery_adder_percentage": "10%",
         "enable_single_position_and_pending": true,
         "enable_default_account_balance_management": true,
         "enable_maximum_account_balance_management": false
