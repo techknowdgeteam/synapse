@@ -12186,6 +12186,68 @@ def martingale(inv_id=None):
             import traceback
             traceback.print_exc()
         
+        # Helper function to recursively update all volume fields for a specific symbol
+        def update_all_volumes_for_symbol(data, symbol, new_volume, updated_count):
+            """
+            Recursively traverse the data structure and update all volume fields
+            for the given symbol. Returns updated count.
+            """
+            if isinstance(data, dict):
+                # Check if this is a symbol entry
+                if data.get("order_type") and ("entry" in data or "exit" in data):
+                    # This is likely an order object
+                    if "volume" in data:
+                        old_volume = data["volume"]
+                        if abs(old_volume - new_volume) > 0.001:
+                            data["volume"] = new_volume
+                            updated_count += 1
+                            print(f"            🔄 Updated volume: {old_volume} → {new_volume} lots")
+                
+                # Recursively process all values
+                for key, value in data.items():
+                    if isinstance(value, (dict, list)):
+                        updated_count = update_all_volumes_for_symbol(value, symbol, new_volume, updated_count)
+            
+            elif isinstance(data, list):
+                # Process each item in the list
+                for i, item in enumerate(data):
+                    if isinstance(item, (dict, list)):
+                        updated_count = update_all_volumes_for_symbol(item, symbol, new_volume, updated_count)
+            
+            return updated_count
+        
+        # Helper function to update all volumes for multiple symbols
+        def update_all_symbol_volumes(signals_data, symbol_volumes):
+            """
+            Update all volume fields for multiple symbols in the signals data.
+            symbol_volumes: dict {symbol: new_volume}
+            Returns dict with symbols and number of updates made
+            """
+            updates_summary = {}
+            
+            # Process each symbol
+            for symbol, new_volume in symbol_volumes.items():
+                print(f"\n        🔍 Searching for all volume entries for {symbol}...")
+                
+                # Count updates for this symbol
+                updated_count = 0
+                
+                # Search through all categories
+                for category_name, category_data in signals_data.get('categories', {}).items():
+                    symbols_in_category = category_data.get('symbols', {})
+                    
+                    if symbol in symbols_in_category:
+                        print(f"          • Found {symbol} in category: {category_name}")
+                        
+                        # Update all volumes in this symbol's data
+                        symbol_data = symbols_in_category[symbol]
+                        updated_count = update_all_volumes_for_symbol(symbol_data, symbol, new_volume, updated_count)
+                
+                updates_summary[symbol] = updated_count
+                print(f"          ✅ Updated {updated_count} volume entries for {symbol}")
+            
+            return updates_summary
+        
         # --- PRE-SCALING: MODIFY SIGNALS.JSON DIRECTLY FOR POSITIONS WITH SL AND HIGHEST-RISK ORDERS ---
         if martingale_pre_scaling:
             print(f"\n  └─ 🎯 PRE-SCALING: Checking positions with SL and highest-risk orders in signals.json...")
@@ -12223,60 +12285,53 @@ def martingale(inv_id=None):
                                 highest_risk = 0
                                 highest_risk_order_info = None
                                 
-                                # Check bid orders
-                                if 'bid_orders' in symbol_signals and symbol_signals['bid_orders']:
-                                    for order in symbol_signals['bid_orders']:
-                                        entry = order.get('entry')
-                                        stop = order.get('exit')
-                                        volume = order.get('volume', 0)
+                                # Helper function to find highest risk in nested structure
+                                def find_highest_risk_in_data(data, symbol, current_highest, current_info):
+                                    if isinstance(data, dict):
+                                        # Check if this is an order object
+                                        if "order_type" in data and "entry" in data and "exit" in data and "volume" in data:
+                                            entry = data.get('entry')
+                                            stop = data.get('exit')
+                                            volume = data.get('volume', 0)
+                                            
+                                            if entry and stop and volume > 0:
+                                                symbol_info = mt5.symbol_info(symbol)
+                                                if symbol_info:
+                                                    contract_size = symbol_info.trade_contract_size
+                                                    price_diff = abs(entry - stop)
+                                                    risk = price_diff * volume * contract_size
+                                                    
+                                                    if risk > current_highest:
+                                                        current_highest = risk
+                                                        current_info = {
+                                                            'order_type': data.get('order_type'),
+                                                            'entry': entry,
+                                                            'stop': stop,
+                                                            'volume': volume,
+                                                            'risk': risk
+                                                        }
                                         
-                                        if entry and stop and volume > 0:
-                                            # Calculate risk for this order
-                                            symbol_info = mt5.symbol_info(symbol)
-                                            if symbol_info:
-                                                contract_size = symbol_info.trade_contract_size
-                                                price_diff = abs(entry - stop)
-                                                risk = price_diff * volume * contract_size
-                                                
-                                                if risk > highest_risk:
-                                                    highest_risk = risk
-                                                    highest_risk_order_info = {
-                                                        'order_type': order.get('order_type'),
-                                                        'entry': entry,
-                                                        'stop': stop,
-                                                        'volume': volume,
-                                                        'risk': risk,
-                                                        'bid_ask': 'bid'
-                                                    }
+                                        # Recursively process all values
+                                        for key, value in data.items():
+                                            if isinstance(value, (dict, list)):
+                                                current_highest, current_info = find_highest_risk_in_data(value, symbol, current_highest, current_info)
+                                    
+                                    elif isinstance(data, list):
+                                        for item in data:
+                                            if isinstance(item, (dict, list)):
+                                                current_highest, current_info = find_highest_risk_in_data(item, symbol, current_highest, current_info)
+                                    
+                                    return current_highest, current_info
                                 
-                                # Check ask orders
-                                if 'ask_orders' in symbol_signals and symbol_signals['ask_orders']:
-                                    for order in symbol_signals['ask_orders']:
-                                        entry = order.get('entry')
-                                        stop = order.get('exit')
-                                        volume = order.get('volume', 0)
-                                        
-                                        if entry and stop and volume > 0:
-                                            symbol_info = mt5.symbol_info(symbol)
-                                            if symbol_info:
-                                                contract_size = symbol_info.trade_contract_size
-                                                price_diff = abs(entry - stop)
-                                                risk = price_diff * volume * contract_size
-                                                
-                                                if risk > highest_risk:
-                                                    highest_risk = risk
-                                                    highest_risk_order_info = {
-                                                        'order_type': order.get('order_type'),
-                                                        'entry': entry,
-                                                        'stop': stop,
-                                                        'volume': volume,
-                                                        'risk': risk,
-                                                        'bid_ask': 'ask'
-                                                    }
+                                # Search through all orders for this symbol
+                                highest_risk, highest_risk_order_info = find_highest_risk_in_data(symbol_signals, symbol, 0, None)
                                 
                                 if highest_risk_order_info:
                                     highest_risk_orders[symbol] = highest_risk_order_info
                                     print(f"      • {symbol}: Highest risk order = ${highest_risk:.2f} ({highest_risk_order_info['order_type']})")
+                        
+                        # Store volumes to update
+                        volumes_to_update = {}
                         
                         # Process each position
                         for position in positions:
@@ -12339,60 +12394,60 @@ def martingale(inv_id=None):
                                     
                                     print(f"          • TOTAL TO RECOVER: ${total_to_recover:.2f}")
                                     
-                                    # Find orders for this symbol in signals.json
-                                    symbol_orders_found = False
+                                    # Find a sample order to calculate volume
                                     sample_entry = None
                                     sample_stop = None
                                     sample_order_type = None
-                                    order_category = None
-                                    order_type_bid_ask = None
+                                    order_found = False
                                     
+                                    # Search for any order for this symbol
                                     for category_name, category_data in signals_data.get('categories', {}).items():
                                         symbols_in_category = category_data.get('symbols', {})
                                         
                                         if symbol in symbols_in_category:
-                                            symbol_signals = symbols_in_category[symbol]
+                                            symbol_data = symbols_in_category[symbol]
                                             
-                                            # Check for bid orders
-                                            if 'bid_orders' in symbol_signals and symbol_signals['bid_orders']:
-                                                sample_order = symbol_signals['bid_orders'][0]
-                                                sample_entry = sample_order.get('entry')
-                                                sample_stop = sample_order.get('exit')
-                                                sample_order_type = sample_order.get('order_type')
-                                                order_category = category_name
-                                                order_type_bid_ask = 'bid'
-                                                symbol_orders_found = True
-                                                break
+                                            # Helper function to find first order
+                                            def find_first_order(data):
+                                                if isinstance(data, dict):
+                                                    if "order_type" in data and "entry" in data and "exit" in data:
+                                                        return data.get('entry'), data.get('exit'), data.get('order_type')
+                                                    
+                                                    for key, value in data.items():
+                                                        if isinstance(value, (dict, list)):
+                                                            result = find_first_order(value)
+                                                            if result[0] is not None:
+                                                                return result
+                                                
+                                                elif isinstance(data, list):
+                                                    for item in data:
+                                                        if isinstance(item, (dict, list)):
+                                                            result = find_first_order(item)
+                                                            if result[0] is not None:
+                                                                return result
+                                                
+                                                return None, None, None
                                             
-                                            # Check for ask orders
-                                            if 'ask_orders' in symbol_signals and symbol_signals['ask_orders']:
-                                                sample_order = symbol_signals['ask_orders'][0]
-                                                sample_entry = sample_order.get('entry')
-                                                sample_stop = sample_order.get('exit')
-                                                sample_order_type = sample_order.get('order_type')
-                                                order_category = category_name
-                                                order_type_bid_ask = 'ask'
-                                                symbol_orders_found = True
+                                            sample_entry, sample_stop, sample_order_type = find_first_order(symbol_data)
+                                            if sample_entry and sample_stop:
+                                                order_found = True
                                                 break
                                     
-                                    if not symbol_orders_found or not sample_entry or not sample_stop:
+                                    if not order_found:
                                         print(f"        ⚠️  No orders found for {symbol} in signals.json")
                                         continue
                                     
-                                    print(f"\n        📝 Found orders for {symbol}:")
-                                    print(f"          • Category: {order_category}")
+                                    print(f"\n        📝 Found sample order for {symbol}:")
                                     print(f"          • Order Type: {sample_order_type}")
                                     print(f"          • Entry Price: {sample_entry}")
                                     print(f"          • Stop Loss: {sample_stop}")
                                     
-                                    is_buy = 'buy' in sample_order_type.lower()
+                                    is_buy = 'buy' in sample_order_type.lower() if sample_order_type else False
                                     
                                     if is_buy:
                                         calc_type = mt5.ORDER_TYPE_BUY
-                                        order_direction = "BUY"
                                     else:
                                         calc_type = mt5.ORDER_TYPE_SELL
-                                        order_direction = "SELL"
                                     
                                     price_diff_order = abs(sample_entry - sample_stop)
                                     
@@ -12466,52 +12521,21 @@ def martingale(inv_id=None):
                                     else:
                                         print(f"          ✅ RISK CHECK PASSED")
                                     
-                                    # Modify signals.json for this symbol
-                                    orders_modified = 0
-                                    original_volume = None
+                                    # Store the new volume for this symbol
+                                    volumes_to_update[symbol] = safe_volume
                                     
-                                    for category_name, category_data in signals_data.get('categories', {}).items():
-                                        symbols_in_category = category_data.get('symbols', {})
-                                        
-                                        if symbol in symbols_in_category:
-                                            symbol_signals = symbols_in_category[symbol]
-                                            
-                                            if 'bid_orders' in symbol_signals:
-                                                for order in symbol_signals['bid_orders']:
-                                                    original_volume = order.get('volume', 0)
-                                                    if abs(original_volume - safe_volume) > 0.001:
-                                                        order['volume'] = safe_volume
-                                                        orders_modified += 1
-                                                        print(f"          🔄 Modified {symbol} bid order: {original_volume} → {safe_volume} lots")
-                                            
-                                            if 'ask_orders' in symbol_signals:
-                                                for order in symbol_signals['ask_orders']:
-                                                    original_volume = order.get('volume', 0)
-                                                    if abs(original_volume - safe_volume) > 0.001:
-                                                        order['volume'] = safe_volume
-                                                        orders_modified += 1
-                                                        print(f"          🔄 Modified {symbol} ask order: {original_volume} → {safe_volume} lots")
+                                    pre_scaling_details[symbol] = {
+                                        "symbol": symbol,
+                                        "has_pre_scaling": True,
+                                        "position_ticket": position.ticket,
+                                        "expected_loss": abs(expected_loss),
+                                        "uncovered_loss": uncovered_loss,
+                                        "highest_order_risk": highest_risk_value,
+                                        "total_to_recover": total_to_recover,
+                                        "new_volume": safe_volume,
+                                        "success": True
+                                    }
                                     
-                                    if orders_modified > 0:
-                                        pre_scaling_details[symbol] = {
-                                            "symbol": symbol,
-                                            "has_pre_scaling": True,
-                                            "position_ticket": position.ticket,
-                                            "expected_loss": abs(expected_loss),
-                                            "uncovered_loss": uncovered_loss,
-                                            "highest_order_risk": highest_risk_value,
-                                            "total_to_recover": total_to_recover,
-                                            "old_volume": original_volume,
-                                            "new_volume": safe_volume,
-                                            "success": True
-                                        }
-                                        
-                                        stats["pre_scaling_applied"] = True
-                                        stats["signals_modified"] = True
-                                        
-                                        # Mark this symbol as handled by pre-scaling
-                                        if symbol in symbol_analysis:
-                                            symbol_analysis[symbol]["handled_by_pre_scaling"] = True
                                 else:
                                     print(f"        ⚠️  Could not get symbol info for {symbol}")
                                     
@@ -12521,14 +12545,31 @@ def martingale(inv_id=None):
                                 traceback.print_exc()
                                 continue
                         
-                        # Save signals.json if any modifications were made
-                        if stats["pre_scaling_applied"]:
-                            with open(signals_path, 'w', encoding='utf-8') as f:
-                                json.dump(signals_data, f, indent=2, ensure_ascii=False)
+                        # Update ALL volumes for each symbol that needs scaling
+                        if volumes_to_update:
+                            print(f"\n      🔄 Updating ALL volume entries for symbols: {', '.join(volumes_to_update.keys())}")
                             
-                            print(f"\n      ✅ Saved signals.json with pre-scaled volumes")
+                            # Update all volumes in signals.json
+                            updates_summary = update_all_symbol_volumes(signals_data, volumes_to_update)
+                            
+                            # Save signals.json if any modifications were made
+                            if any(count > 0 for count in updates_summary.values()):
+                                with open(signals_path, 'w', encoding='utf-8') as f:
+                                    json.dump(signals_data, f, indent=2, ensure_ascii=False)
+                                
+                                stats["pre_scaling_applied"] = True
+                                stats["signals_modified"] = True
+                                
+                                print(f"\n      ✅ Saved signals.json with updated volumes")
+                                
+                                # Mark symbols as handled by pre-scaling
+                                for symbol in volumes_to_update.keys():
+                                    if symbol in symbol_analysis:
+                                        symbol_analysis[symbol]["handled_by_pre_scaling"] = True
+                            else:
+                                print(f"\n      ℹ️  No volume changes needed")
                         else:
-                            print(f"\n      ℹ️  No pre-scaling modifications made")
+                            print(f"\n      ℹ️  No pre-scaling modifications needed")
                         
                 else:
                     print(f"      ℹ️  No positions found to check for pre-scaling")
@@ -12566,8 +12607,8 @@ def martingale(inv_id=None):
                     print(f"      📂 Loaded signals.json")
                     print(f"      🔄 Symbols requiring recovery: {', '.join(symbols_with_recovery_needed)}")
                     
-                    # Track modifications per symbol
-                    modifications_made = []
+                    # Track volumes to update
+                    volumes_to_update = {}
                     
                     # Process each symbol that needs recovery
                     for recovery_symbol in symbols_with_recovery_needed:
@@ -12585,61 +12626,59 @@ def martingale(inv_id=None):
                         print(f"      💰 Required profit to recover (with {stats['martingale_loss_recovery_adder_percentage']}% adder): ${required_profit_with_adder:.2f}")
                         print(f"      📊 Base loss amount: ${symbol_analysis_data.get('total_loss_amount', 0):.2f}")
                         
-                        # Find orders for this specific symbol in signals.json
-                        symbol_orders_found = False
-                        sample_order = None
+                        # Find a sample order for this symbol
                         sample_entry = None
                         sample_stop = None
                         sample_order_type = None
-                        order_category = None
-                        order_type_bid_ask = None
+                        order_found = False
                         
                         for category_name, category_data in signals_data.get('categories', {}).items():
                             symbols_in_category = category_data.get('symbols', {})
                             
                             if recovery_symbol in symbols_in_category:
-                                symbol_signals = symbols_in_category[recovery_symbol]
+                                symbol_data = symbols_in_category[recovery_symbol]
                                 
-                                # Check for bid orders
-                                if 'bid_orders' in symbol_signals and symbol_signals['bid_orders']:
-                                    sample_order = symbol_signals['bid_orders'][0]
-                                    sample_entry = sample_order.get('entry')
-                                    sample_stop = sample_order.get('exit')
-                                    sample_order_type = sample_order.get('order_type')
-                                    order_category = category_name
-                                    order_type_bid_ask = 'bid'
-                                    symbol_orders_found = True
-                                    break
+                                # Helper function to find first order
+                                def find_first_order(data):
+                                    if isinstance(data, dict):
+                                        if "order_type" in data and "entry" in data and "exit" in data:
+                                            return data.get('entry'), data.get('exit'), data.get('order_type')
+                                        
+                                        for key, value in data.items():
+                                            if isinstance(value, (dict, list)):
+                                                result = find_first_order(value)
+                                                if result[0] is not None:
+                                                    return result
+                                    
+                                    elif isinstance(data, list):
+                                        for item in data:
+                                            if isinstance(item, (dict, list)):
+                                                result = find_first_order(item)
+                                                if result[0] is not None:
+                                                    return result
+                                    
+                                    return None, None, None
                                 
-                                # Check for ask orders
-                                if 'ask_orders' in symbol_signals and symbol_signals['ask_orders']:
-                                    sample_order = symbol_signals['ask_orders'][0]
-                                    sample_entry = sample_order.get('entry')
-                                    sample_stop = sample_order.get('exit')
-                                    sample_order_type = sample_order.get('order_type')
-                                    order_category = category_name
-                                    order_type_bid_ask = 'ask'
-                                    symbol_orders_found = True
+                                sample_entry, sample_stop, sample_order_type = find_first_order(symbol_data)
+                                if sample_entry and sample_stop:
+                                    order_found = True
                                     break
                         
-                        if not symbol_orders_found or not sample_entry or not sample_stop:
+                        if not order_found:
                             print(f"      ⚠️  No orders found for {recovery_symbol} in signals.json")
                             continue
                         
-                        print(f"      📝 Found orders for {recovery_symbol}:")
-                        print(f"        • Category: {order_category}")
+                        print(f"      📝 Found sample order for {recovery_symbol}:")
                         print(f"        • Order Type: {sample_order_type}")
                         print(f"        • Entry Price: {sample_entry}")
                         print(f"        • Stop Loss: {sample_stop}")
                         
-                        is_buy = 'buy' in sample_order_type.lower()
+                        is_buy = 'buy' in sample_order_type.lower() if sample_order_type else False
                         
                         if is_buy:
                             calc_type = mt5.ORDER_TYPE_BUY
-                            order_direction = "BUY"
                         else:
                             calc_type = mt5.ORDER_TYPE_SELL
-                            order_direction = "SELL"
                         
                         symbol_info = mt5.symbol_info(recovery_symbol)
                         if not symbol_info:
@@ -12773,75 +12812,35 @@ def martingale(inv_id=None):
                                         "risk_check_passed": False,
                                         "risk_exceeded": True
                                     }
+                                
+                                # Store volume to update
+                                volumes_to_update[recovery_symbol] = safe_volume
+                                
                             else:
                                 print(f"      ⚠️  Could not calculate risk")
                                 risk_check_passed = False
                         else:
                             print(f"      ⚠️  Could not calculate profit")
                             risk_check_passed = False
-                        
-                        # Modify signals.json for this specific symbol if needed
-                        if risk_check_passed and safe_volume > 0 and safe_volume >= 0.01:
-                            # Get original volume for comparison
-                            original_volume = sample_order.get('volume', 0)
-                            
-                            if abs(safe_volume - original_volume) < 0.001:
-                                print(f"      ℹ️  Calculated volume ({safe_volume} lots) is same as original for {recovery_symbol}")
-                                modifications_made.append({
-                                    "symbol": recovery_symbol,
-                                    "modified": False,
-                                    "old_volume": original_volume,
-                                    "new_volume": safe_volume
-                                })
-                            else:
-                                # Update orders for this specific symbol only in signals.json
-                                orders_modified = 0
-                                
-                                for category_name, category_data in signals_data.get('categories', {}).items():
-                                    symbols_in_category = category_data.get('symbols', {})
-                                    
-                                    if recovery_symbol in symbols_in_category:
-                                        symbol_signals = symbols_in_category[recovery_symbol]
-                                        
-                                        if 'bid_orders' in symbol_signals:
-                                            for order in symbol_signals['bid_orders']:
-                                                old_volume = order.get('volume', 0)
-                                                if abs(old_volume - safe_volume) > 0.001:
-                                                    order['volume'] = safe_volume
-                                                    orders_modified += 1
-                                                    print(f"        🔄 Modified {recovery_symbol} bid order in signals.json: {old_volume} → {safe_volume} lots")
-                                        
-                                        if 'ask_orders' in symbol_signals:
-                                            for order in symbol_signals['ask_orders']:
-                                                old_volume = order.get('volume', 0)
-                                                if abs(old_volume - safe_volume) > 0.001:
-                                                    order['volume'] = safe_volume
-                                                    orders_modified += 1
-                                                    print(f"        🔄 Modified {recovery_symbol} ask order in signals.json: {old_volume} → {safe_volume} lots")
-                                
-                                if orders_modified > 0:
-                                    modifications_made.append({
-                                        "symbol": recovery_symbol,
-                                        "modified": True,
-                                        "old_volume": original_volume,
-                                        "new_volume": safe_volume,
-                                        "orders_modified": orders_modified
-                                    })
-                                    print(f"\n      ✅ Modified {orders_modified} orders in signals.json for {recovery_symbol} to volume: {safe_volume} lots")
                     
-                    # Save signals.json if any modifications were made
-                    if modifications_made and any(mod.get('modified', False) for mod in modifications_made):
-                        with open(signals_path, 'w', encoding='utf-8') as f:
-                            json.dump(signals_data, f, indent=2, ensure_ascii=False)
+                    # Update ALL volumes for symbols that need recovery
+                    if volumes_to_update:
+                        print(f"\n      🔄 Updating ALL volume entries for symbols: {', '.join(volumes_to_update.keys())}")
                         
-                        stats["signals_modified"] = True
-                        print(f"\n      ✅ Saved signals.json with {len([m for m in modifications_made if m.get('modified')])} symbols modified")
-                    else:
-                        stats["signals_modified"] = False
-                        if modifications_made:
-                            print(f"\n      ℹ️  No volume changes needed for any symbols")
+                        # Update all volumes in signals.json
+                        updates_summary = update_all_symbol_volumes(signals_data, volumes_to_update)
+                        
+                        # Save signals.json if any modifications were made
+                        if any(count > 0 for count in updates_summary.values()):
+                            with open(signals_path, 'w', encoding='utf-8') as f:
+                                json.dump(signals_data, f, indent=2, ensure_ascii=False)
+                            
+                            stats["signals_modified"] = True
+                            print(f"\n      ✅ Saved signals.json with updated volumes")
                         else:
-                            print(f"\n      ℹ️  No modifications made")
+                            print(f"\n      ℹ️  No volume changes needed")
+                    else:
+                        print(f"\n      ℹ️  No modifications made")
                     
                 except Exception as e:
                     print(f"       Error: {e}")
@@ -12879,35 +12878,43 @@ def martingale(inv_id=None):
                     with open(signals_path, 'r', encoding='utf-8') as f:
                         signals_data = json.load(f)
                     
-                    # Build expected volumes dictionary from signals.json
+                    # Build expected volumes dictionary from signals.json (search recursively)
                     expected_volumes = {}
                     
+                    def collect_expected_volumes(data, symbol, direction):
+                        if isinstance(data, dict):
+                            # Check if this is an order object with the right symbol
+                            if data.get("order_type") and "entry" in data and "exit" in data:
+                                # Determine if this is bid or ask based on order type
+                                order_type = data.get("order_type", "").lower()
+                                expected_volume = data.get("volume", 0)
+                                
+                                if expected_volume > 0:
+                                    if "buy" in order_type:
+                                        if symbol not in expected_volumes:
+                                            expected_volumes[symbol] = {}
+                                        expected_volumes[symbol]['bid'] = expected_volume
+                                    elif "sell" in order_type:
+                                        if symbol not in expected_volumes:
+                                            expected_volumes[symbol] = {}
+                                        expected_volumes[symbol]['ask'] = expected_volume
+                            
+                            # Recursively process all values
+                            for key, value in data.items():
+                                if isinstance(value, (dict, list)):
+                                    collect_expected_volumes(value, symbol, direction)
+                        
+                        elif isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, (dict, list)):
+                                    collect_expected_volumes(item, symbol, direction)
+                    
+                    # Collect expected volumes for all symbols
                     for category_name, category_data in signals_data.get('categories', {}).items():
                         symbols_in_category = category_data.get('symbols', {})
                         
                         for symbol, symbol_signals in symbols_in_category.items():
-                            # Check bid orders
-                            if 'bid_orders' in symbol_signals and symbol_signals['bid_orders']:
-                                for order in symbol_signals['bid_orders']:
-                                    order_type = order.get('order_type', '').lower()
-                                    expected_volume = order.get('volume', 0)
-                                    
-                                    if expected_volume > 0:
-                                        # Store expected volume for this symbol and order type
-                                        if symbol not in expected_volumes:
-                                            expected_volumes[symbol] = {}
-                                        expected_volumes[symbol]['bid'] = expected_volume
-                            
-                            # Check ask orders
-                            if 'ask_orders' in symbol_signals and symbol_signals['ask_orders']:
-                                for order in symbol_signals['ask_orders']:
-                                    order_type = order.get('order_type', '').lower()
-                                    expected_volume = order.get('volume', 0)
-                                    
-                                    if expected_volume > 0:
-                                        if symbol not in expected_volumes:
-                                            expected_volumes[symbol] = {}
-                                        expected_volumes[symbol]['ask'] = expected_volume
+                            collect_expected_volumes(symbol_signals, symbol, None)
                     
                     print(f"      📋 Expected volumes from signals.json:")
                     for symbol, volumes in expected_volumes.items():
@@ -13047,7 +13054,7 @@ def martingale(inv_id=None):
                     if details.get('highest_order_risk'):
                         print(f"         • Highest order risk: ${details['highest_order_risk']:.2f}")
                     print(f"         • Total to recover: ${details['total_to_recover']:.2f}")
-                    print(f"         • Volume: {details['old_volume']} → {details['new_volume']} lots")
+                    print(f"         • New volume: {details['new_volume']} lots")
                     print(f"         • Status: {'✅ SUCCESS' if details.get('success') else ' FAILED'}")
         
         if stats.get('symbol_analysis'):
