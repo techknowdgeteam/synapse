@@ -119,6 +119,5 @@ def update_insiders_from_json():
         db.shutdown()
 
 if __name__ == "__main__":
-   fetch_insiders_rows()
    update_insiders_from_json()
     
