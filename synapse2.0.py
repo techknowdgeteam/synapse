@@ -2620,6 +2620,9 @@ def directional_bias(inv_id=None):
     Timeframe is read from accountmanagement.json "timeframe" field (can be string or list).
     Supported timeframes: 1m, 5m, 15m, 30m, 45m, 1h, 2h, 4h (4h is max)
     
+    Saves limit orders ONLY to: INV_PATH/{investor_id}/{strategy_name}/pending_orders/limit_orders.json
+    Handles its own order cancellation before saving new signals.
+    
     Args:
         inv_id: Optional specific investor ID to process
         
@@ -2640,12 +2643,14 @@ def directional_bias(inv_id=None):
         "bearish_signals": 0,
         "total_signals": 0,
         "signals_generated": False,
-        "timeframes_used": []
+        "timeframes_used": [],
+        "skipped_signals": 0,
+        "cancelled_pending_orders": 0
     }
     
     def get_candle_center(candle):
-        """Calculate center price of a candle's BODY (open + close) / 2"""
-        return (candle['open'] + candle['close']) / 2
+        """Calculate center price of a candle using HIGH and LOW (not open/close)"""
+        return (candle['high'] + candle['low']) / 2
     
     def normalize_symbol_for_filename(raw_symbol):
         """Remove special characters from symbol for filename"""
@@ -2658,7 +2663,7 @@ def directional_bias(inv_id=None):
         
         if not acc_mgmt_path.exists():
             print(f" [{investor_id}] ❌ Account management file not found")
-            return None, None, None, None
+            return None, None, None, None, None
         
         try:
             with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
@@ -2668,7 +2673,7 @@ def directional_bias(inv_id=None):
             symbols_dict = config.get("symbols_dictionary", {})
             if not symbols_dict:
                 print(f" [{investor_id}] ⚠️ No symbols_dictionary found")
-                return None, None, None, None
+                return None, None, None, None, None
             
             # Get timeframe (can be string or list)
             timeframe_config = config.get("timeframe", "15m")
@@ -2680,7 +2685,7 @@ def directional_bias(inv_id=None):
                 timeframes = timeframe_config
             else:
                 print(f" [{investor_id}] ⚠️ Invalid timeframe format: {type(timeframe_config)}")
-                return None, None, None, None
+                return None, None, None, None, None
             
             # Validate timeframes
             valid_timeframes = []
@@ -2692,22 +2697,23 @@ def directional_bias(inv_id=None):
             
             if not valid_timeframes:
                 print(f" [{investor_id}] ❌ No valid timeframes provided")
-                return None, None, None, None
+                return None, None, None, None, None
             
             print(f" [{investor_id}] 📊 Using timeframes: {valid_timeframes}")
             
             # Get selected risk reward
             selected_risk_reward = config.get("selected_risk_reward", [1])
             if isinstance(selected_risk_reward, list) and len(selected_risk_reward) > 0:
-                risk_reward = selected_risk_reward[0]  # Use first value from list
+                risk_reward = selected_risk_reward[0]
             else:
-                risk_reward = 1  # Default value
+                risk_reward = 1
             
             print(f" [{investor_id}] 📈 Risk/Reward: {risk_reward}")
             
-            # Get target folder from investor config
+            # Get target folder and strategy name from investor config
             investor_users_path = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json")
             target_folder = None
+            strategy_name = None
             
             if investor_users_path.exists():
                 with open(investor_users_path, 'r', encoding='utf-8') as f:
@@ -2718,20 +2724,25 @@ def directional_bias(inv_id=None):
                     invested_with = investor_cfg.get("INVESTED_WITH", "")
                     if "_" in invested_with:
                         target_folder = invested_with.split("_", 1)[1]
+                        strategy_name = target_folder
                     else:
                         target_folder = invested_with
+                        strategy_name = invested_with
             
             if not target_folder:
                 print(f" [{investor_id}] ⚠️ No TARGET_FOLDER found, using 'prices'")
                 target_folder = "prices"
+                strategy_name = "prices"
             
-            return symbols_dict, valid_timeframes, target_folder, risk_reward
+            print(f" [{investor_id}] 📁 Strategy name: {strategy_name}")
+            
+            return symbols_dict, valid_timeframes, target_folder, risk_reward, strategy_name
             
         except Exception as e:
             print(f" [{investor_id}] ❌ Error loading config: {e}")
             import traceback
             traceback.print_exc()
-            return None, None, None, None
+            return None, None, None, None, None
     
     def load_candle_data(investor_id, symbol, timeframe, target_folder):
         """Load candle data from pre-generated JSON file"""
@@ -2817,21 +2828,14 @@ def directional_bias(inv_id=None):
         current_candle = candle_data['current']
         
         if bias_type == 'bullish':
-            # Default exit is candle 2 high
             exit_price = candle_2['high']
-            
-            # Check if current candle's high exceeds candle 2 high
             if current_candle['high'] > candle_2['high']:
                 exit_price = current_candle['high']
                 print(f"     📈 Exit updated: Current candle high ({current_candle['high']:.{digits}f}) > Candle 2 high ({candle_2['high']:.{digits}f})")
             else:
                 print(f"     📈 Exit (Candle 2 high): {exit_price:.{digits}f}")
-                
-        else:  # bearish
-            # Default exit is candle 2 low
+        else:
             exit_price = candle_2['low']
-            
-            # Check if current candle's low is below candle 2 low
             if current_candle['low'] < candle_2['low']:
                 exit_price = current_candle['low']
                 print(f"     📉 Exit updated: Current candle low ({current_candle['low']:.{digits}f}) < Candle 2 low ({candle_2['low']:.{digits}f})")
@@ -2840,26 +2844,126 @@ def directional_bias(inv_id=None):
         
         return exit_price
     
+    def cancel_existing_pending_orders(investor_root, symbol, order_type):
+        """
+        Cancel all existing pending orders for a specific symbol with matching order type.
+        Returns the number of orders cancelled.
+        """
+        cancelled_count = 0
+        
+        try:
+            # Ensure MT5 is initialized
+            if not mt5.terminal_info():
+                if not mt5.initialize():
+                    print(f"     ⚠️ Failed to initialize MT5, skipping order cancellation")
+                    return 0
+            
+            # Get all pending orders
+            pending_orders = mt5.orders_get()
+            if not pending_orders:
+                return 0
+            
+            for order in pending_orders:
+                order_symbol = order.symbol
+                order_type_int = order.type
+                
+                # Map MT5 order type to string
+                order_type_str = None
+                if order_type_int == mt5.ORDER_TYPE_BUY_STOP:
+                    order_type_str = "buy_stop"
+                elif order_type_int == mt5.ORDER_TYPE_SELL_STOP:
+                    order_type_str = "sell_stop"
+                else:
+                    continue
+                
+                # Check if symbol matches
+                normalized_order_symbol = normalize_symbol_for_filename(order_symbol)
+                normalized_target_symbol = normalize_symbol_for_filename(symbol)
+                
+                symbol_matches = (order_symbol == symbol or normalized_order_symbol == normalized_target_symbol)
+                
+                if symbol_matches and order_type_str == order_type:
+                    print(f"     🗑️ Found matching pending order: #{order.ticket} ({order_symbol}) {order_type_str} @ {order.price_open}")
+                    
+                    # Cancel the order
+                    delete_request = {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": order.ticket,
+                    }
+                    
+                    result = mt5.order_send(delete_request)
+                    
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        print(f"     ✅ CANCELLED pending order: #{order.ticket} ({order_symbol}) {order_type_str} @ {order.price_open}")
+                        cancelled_count += 1
+                    else:
+                        error_msg = result.comment if result else f"Error code: {result.retcode if result else 'Unknown'}"
+                        print(f"     ⚠️ Could not cancel order #{order.ticket}: {error_msg}")
+            
+            if cancelled_count > 0:
+                print(f"     ✅ Successfully cancelled {cancelled_count} pending order(s)")
+            
+            return cancelled_count
+            
+        except Exception as e:
+            print(f"     ⚠️ Error cancelling pending orders: {e}")
+            return 0
+    
+    def is_candle_time_already_recorded(records_file, symbol, timeframe, current_candle_time):
+        """Check if the current forming candle time is already recorded"""
+        if not records_file.exists():
+            return False
+        
+        try:
+            with open(records_file, 'r', encoding='utf-8') as f:
+                records = json.load(f)
+            
+            for record in records:
+                if (record.get('symbol') == symbol and 
+                    record.get('timeframe') == timeframe and 
+                    record.get('current_candle_time') == current_candle_time):
+                    return True
+            return False
+        except Exception as e:
+            print(f"     ⚠️ Error reading records file: {e}")
+            return False
+    
+    def save_candle_time_record(records_file, symbol, timeframe, current_candle_time, signal_info):
+        """Save the current forming candle time record after generating a signal"""
+        try:
+            if records_file.exists():
+                with open(records_file, 'r', encoding='utf-8') as f:
+                    records = json.load(f)
+            else:
+                records = []
+            
+            new_record = {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "current_candle_time": current_candle_time,
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "signal_type": signal_info.get('order_type'),
+                "entry_price": signal_info.get('entry'),
+                "exit_price": signal_info.get('exit')
+            }
+            
+            records.append(new_record)
+            
+            with open(records_file, 'w', encoding='utf-8') as f:
+                json.dump(records, f, indent=4)
+            
+            print(f"     📝 Recorded candle time: {current_candle_time}")
+            return True
+        except Exception as e:
+            print(f"     ⚠️ Error saving candle time record: {e}")
+            return False
+    
     def analyze_directional_bias(candle_data, symbol, digits):
-        """
-        Analyze directional bias based on the 2 most recent completed candles.
-        
-        Bullish pattern: Both green candles with higher highs and higher lows
-        - Candle 2 high > Candle 1 high
-        - Candle 2 low > Candle 1 low
-        - Entry: sell_stop at Candle 1 BODY center (open + close) / 2
-        - Exit: high of candle 2 (or current candle high if higher)
-        
-        Bearish pattern: Both red candles with lower highs and lower lows
-        - Candle 2 low < Candle 1 low
-        - Candle 2 high < Candle 1 high
-        - Entry: buy_stop at Candle 1 BODY center (open + close) / 2
-        - Exit: low of candle 2 (or current candle low if lower)
-        """
+        """Analyze directional bias based on the 2 most recent completed candles"""
         candle_1 = candle_data['candle_1']
         candle_2 = candle_data['candle_2']
         
-        # Check if both candles are bullish
+        # Check for bullish pattern
         candle_2_bullish = candle_2['close'] > candle_2['open']
         candle_1_bullish = candle_1['close'] > candle_1['open']
         
@@ -2876,12 +2980,8 @@ def directional_bias(inv_id=None):
                 entry_price = get_candle_center(candle_1)
                 exit_price = calculate_exit_price('bullish', candle_data, digits)
                 
-                # Calculate candle body center for display
-                body_center = (candle_1['open'] + candle_1['close']) / 2
-                
                 print(f"\n  ✅ BULLISH PATTERN DETECTED")
-                print(f"     • Entry (Candle 1 Body Center): {entry_price:.{digits}f}")
-                print(f"     • Candle 1 Open: {candle_1['open']:.{digits}f}, Close: {candle_1['close']:.{digits}f}")
+                print(f"     • Entry (Candle 1 Center): {entry_price:.{digits}f}")
                 print(f"     • Exit: {exit_price:.{digits}f}")
                 print(f"     • Order Type: sell_stop")
                 
@@ -2889,7 +2989,7 @@ def directional_bias(inv_id=None):
             else:
                 print(f"     ❌ Failed higher highs/lows condition")
         
-        # Check if both candles are bearish
+        # Check for bearish pattern
         candle_2_bearish = candle_2['close'] < candle_2['open']
         candle_1_bearish = candle_1['close'] < candle_1['open']
         
@@ -2905,12 +3005,8 @@ def directional_bias(inv_id=None):
                 entry_price = get_candle_center(candle_1)
                 exit_price = calculate_exit_price('bearish', candle_data, digits)
                 
-                # Calculate candle body center for display
-                body_center = (candle_1['open'] + candle_1['close']) / 2
-                
                 print(f"\n  ✅ BEARISH PATTERN DETECTED")
-                print(f"     • Entry (Candle 1 Body Center): {entry_price:.{digits}f}")
-                print(f"     • Candle 1 Open: {candle_1['open']:.{digits}f}, Close: {candle_1['close']:.{digits}f}")
+                print(f"     • Entry (Candle 1 Center): {entry_price:.{digits}f}")
                 print(f"     • Exit: {exit_price:.{digits}f}")
                 print(f"     • Order Type: buy_stop")
                 
@@ -2918,35 +3014,49 @@ def directional_bias(inv_id=None):
             else:
                 print(f"     ❌ Failed lower highs/lows condition")
         
-        print(f"\n  ❌ NO PATTERN DETECTED - No matching bias criteria")
+        print(f"\n  ❌ NO PATTERN DETECTED")
         return None, None, None
     
-    def save_directional_signals(prices_dir, all_signals, account_balance, account_currency, timeframe):
-        """Save directional bias signals to JSON file"""
-        signals_file = prices_dir / f"signals.json"
+    def save_directional_signals(strategy_path, new_signals, strategy_name, investor_id):
+        """
+        Save directional bias signals to limit_orders.json file.
+        OVERWRITES the file completely with only the new signals.
+        """
+        pending_orders_dir = strategy_path / "pending_orders"
+        pending_orders_dir.mkdir(exist_ok=True)
         
-        final_data = {
-            "account_type": "",
-            "account_balance": account_balance,
-            "account_currency": account_currency,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "timeframe": timeframe,
-            "total_signals": len(all_signals),
-            "signals": all_signals
-        }
+        signals_file = pending_orders_dir / "limit_orders.json"
         
+        # Overwrite with fresh signals
         with open(signals_file, 'w', encoding='utf-8') as f:
-            json.dump(final_data, f, indent=4)
+            json.dump(new_signals, f, indent=4)
         
+        # Count order types by symbol
+        symbol_stats = {}
+        for signal in new_signals:
+            sym = signal.get('symbol')
+            order_type = signal.get('order_type')
+            if sym not in symbol_stats:
+                symbol_stats[sym] = {'buy_stop': 0, 'sell_stop': 0}
+            symbol_stats[sym][order_type] = symbol_stats[sym].get(order_type, 0) + 1
+        
+        print(f"\n  💾 Signals saved to: {signals_file}")
+        if symbol_stats:
+            print(f"     📊 Per-symbol order counts:")
+            for sym, counts in symbol_stats.items():
+                print(f"        • {sym}: Buy Stop: {counts.get('buy_stop', 0)}, Sell Stop: {counts.get('sell_stop', 0)}")
+        print(f"     📊 Total signals saved: {len(new_signals)}")
+        
+        return signals_file
     
     def get_min_volume(symbol_info=None):
         """Get minimum volume for symbol"""
-        return 0.01  # Minimum lot size
+        return 0.01
     
     # Main execution
     if inv_id:
         # Load investor configuration
-        symbols_dict, timeframes, target_folder, risk_reward = load_investor_config(inv_id)
+        symbols_dict, timeframes, target_folder, risk_reward, strategy_name = load_investor_config(inv_id)
         
         if not symbols_dict or not timeframes:
             print(f" [{inv_id}] ❌ Failed to load configuration")
@@ -2954,19 +3064,29 @@ def directional_bias(inv_id=None):
         
         print(f"\n  ⏰ Timeframes: {timeframes}")
         print(f"  📁 Target folder: {target_folder}")
+        print(f"  📁 Strategy name: {strategy_name}")
         print(f"  📈 Risk/Reward: {risk_reward}")
         
-        # Get account info
-        account_balance = 10000.0
-        account_currency = "USD"
+        # Initialize MT5 for order cancellation
+        if not mt5.terminal_info():
+            print(f" [{inv_id}] Initializing MT5 connection...")
+            if not mt5.initialize():
+                print(f" [{inv_id}] ⚠️ Failed to initialize MT5, order cancellation disabled")
         
-        prices_dir = Path(INV_PATH) / inv_id / "prices"
-        prices_dir.mkdir(exist_ok=True)
+        # Strategy base directory
+        strategy_base_dir = Path(INV_PATH) / inv_id / strategy_name
+        
+        # Create records directory
+        records_dir = strategy_base_dir / "pending_orders"
+        records_dir.mkdir(exist_ok=True)
+        records_file = records_dir / "candle_time_records.json"
         
         total_symbols = 0
         successful_symbols = 0
         failed_symbols = 0
-        all_timeframes_signals = {}
+        skipped_signals = 0
+        all_signals = []
+        total_cancelled = 0
         
         # Process each timeframe
         for timeframe in timeframes:
@@ -2979,7 +3099,7 @@ def directional_bias(inv_id=None):
             timeframe_signals = []
             timeframe_symbols_processed = 0
             
-            # Process each symbol for this timeframe
+            # Process each symbol
             for category, symbols in symbols_dict.items():
                 for raw_symbol in symbols:
                     if not raw_symbol:
@@ -2987,12 +3107,22 @@ def directional_bias(inv_id=None):
                     
                     symbol = raw_symbol.upper()
                     
-                    # Load candle data from JSON
+                    # Load candle data
                     candle_data, error = load_candle_data(inv_id, symbol, timeframe, target_folder)
                     
                     if candle_data is None:
                         print(f"\n  ❌ {symbol} [{timeframe}]: {error}")
                         failed_symbols += 1
+                        continue
+                    
+                    # Get current forming candle time
+                    current_candle_time = candle_data['current'].get('time', '')
+                    
+                    # Check for duplicate
+                    if is_candle_time_already_recorded(records_file, symbol, timeframe, current_candle_time):
+                        print(f"\n  ⏭️ SKIPPING {symbol} [{timeframe}]: Signal already generated for candle: {current_candle_time}")
+                        skipped_signals += 1
+                        stats["skipped_signals"] += 1
                         continue
                     
                     # Determine digits for rounding
@@ -3016,18 +3146,25 @@ def directional_bias(inv_id=None):
                         failed_symbols += 1
                         continue
                     
-                    # Set order type based on bias
+                    # Set order type
                     if bias_type == 'bullish':
                         order_type = "sell_stop"
                         timeframe_bullish += 1
-                    else:  # bearish
+                    else:
                         order_type = "buy_stop"
                         timeframe_bearish += 1
+                    
+                    # CANCEL existing pending orders of the same type for this symbol
+                    print(f"\n  🔄 Checking for existing {order_type} orders for {symbol}...")
+                    cancelled = cancel_existing_pending_orders(Path(INV_PATH) / inv_id, symbol, order_type)
+                    if cancelled > 0:
+                        total_cancelled += cancelled
+                        stats["cancelled_pending_orders"] += cancelled
                     
                     # Get minimum volume
                     min_volume = get_min_volume()
                     
-                    # Create signal object with exit price
+                    # Create signal
                     signal = {
                         "symbol": symbol,
                         "timeframe": timeframe,
@@ -3035,84 +3172,111 @@ def directional_bias(inv_id=None):
                         "order_type": order_type,
                         "entry": round(entry_price, digits),
                         "exit": round(exit_price, digits),
-                        "volume": min_volume
+                        "volume": min_volume,
+                        "current_candle_time": current_candle_time,
+                        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "strategy": strategy_name
                     }
                     
-                    timeframe_signals.append(signal)
-                    timeframe_symbols_processed += 1
-                    successful_symbols += 1
-                    total_symbols += 1
+                    # Save candle time record
+                    signal_info = {
+                        'order_type': order_type,
+                        'entry': round(entry_price, digits),
+                        'exit': round(exit_price, digits)
+                    }
                     
-                    print(f"\n  💾 SIGNAL SAVED: {symbol} [{timeframe}] [{bias_type.upper()}]")
-                    print(f"     Order: {order_type} at {round(entry_price, digits)}")
-                    print(f"     Exit: {round(exit_price, digits)}")
-                    print(f"     Volume: {min_volume}")
-                    print(f"     Risk/Reward: {risk_reward}")
+                    if save_candle_time_record(records_file, symbol, timeframe, current_candle_time, signal_info):
+                        timeframe_signals.append(signal)
+                        all_signals.append(signal)
+                        timeframe_symbols_processed += 1
+                        successful_symbols += 1
+                        total_symbols += 1
+                        
+                        print(f"\n  💾 SIGNAL GENERATED: {symbol} [{timeframe}] [{bias_type.upper()}]")
+                        print(f"     Order: {order_type} at {round(entry_price, digits)}")
+                        print(f"     Exit: {round(exit_price, digits)}")
+                        print(f"     Volume: {min_volume}")
+                        print(f"     Risk/Reward: {risk_reward}")
+                        print(f"     Strategy: {strategy_name}")
+                    else:
+                        print(f"\n  ❌ FAILED to record signal for {symbol} [{timeframe}]")
+                        failed_symbols += 1
             
-            # Save signals for this timeframe
+            # Update stats
+            stats["bullish_signals"] += timeframe_bullish
+            stats["bearish_signals"] += timeframe_bearish
+            stats["total_signals"] += len(timeframe_signals)
+            stats["timeframes_used"].append(timeframe)
+            
             if timeframe_signals:
-                # Save as array format (matching your requirement)
-                signals_file = prices_dir / f"signals.json"
-                
-                with open(signals_file, 'w', encoding='utf-8') as f:
-                    json.dump(timeframe_signals, f, indent=4)
-                    
                 print(f"\n  📊 SUMMARY for {timeframe}:")
                 print(f"     • Symbols processed: {timeframe_symbols_processed}")
-                print(f"     • Bullish signals: {timeframe_bullish}")
-                print(f"     • Bearish signals: {timeframe_bearish}")
+                print(f"     • Bullish signals (sell_stop): {timeframe_bullish}")
+                print(f"     • Bearish signals (buy_stop): {timeframe_bearish}")
                 print(f"     • Total signals: {len(timeframe_signals)}")
-                
-                all_timeframes_signals[timeframe] = {
-                    "bullish": timeframe_bullish,
-                    "bearish": timeframe_bearish,
-                    "total": len(timeframe_signals),
-                    "signals": timeframe_signals
-                }
-                
-                stats["bullish_signals"] += timeframe_bullish
-                stats["bearish_signals"] += timeframe_bearish
-                stats["total_signals"] += len(timeframe_signals)
-                stats["timeframes_used"].append(timeframe)
+        
+        # Save signals
+        if all_signals:
+            save_directional_signals(strategy_base_dir, all_signals, strategy_name, inv_id)
+            stats["signals_generated"] = True
+        else:
+            # Remove existing file if no signals
+            signals_file = strategy_base_dir / "pending_orders" / "limit_orders.json"
+            if signals_file.exists():
+                signals_file.unlink()
+                print(f"\n  🗑️ No signals generated - removed existing limit_orders.json")
         
         # Final summary
-        if stats["total_signals"] > 0:
-            stats["signals_generated"] = True
-            stats["total_symbols"] = total_symbols
-            stats["successful_symbols"] = successful_symbols
-            stats["failed_symbols"] = failed_symbols
+        stats["total_symbols"] = total_symbols
+        stats["successful_symbols"] = successful_symbols
+        stats["failed_symbols"] = failed_symbols
+        
+        print(f"\n{'='*60}")
+        print(f"  📊 FINAL SUMMARY for Investor {inv_id}")
+        print(f"  {'='*60}")
+        print(f"  • Strategy: {strategy_name}")
+        print(f"  • Timeframes processed: {timeframes}")
+        print(f"  • Total symbols: {total_symbols}")
+        print(f"  • Successful: {successful_symbols}")
+        print(f"  • Failed: {failed_symbols}")
+        print(f"  • Skipped (duplicate): {skipped_signals}")
+        print(f"  • Bullish signals (sell_stop): {stats['bullish_signals']}")
+        print(f"  • Bearish signals (buy_stop): {stats['bearish_signals']}")
+        print(f"  • Total signals generated: {stats['total_signals']}")
+        print(f"  • Pending orders cancelled: {total_cancelled}")
+        print(f"  • Signals saved to: {strategy_base_dir}/pending_orders/limit_orders.json")
+        print(f"  {'='*60}")
+        
+        # Create master summary file
+        if stats["signals_generated"]:
+            master_signals_file = strategy_base_dir / "pending_orders" / "directional_signals_all.json"
             
-            print(f"\n{'='*60}")
-            print(f"  📊 FINAL SUMMARY for Investor {inv_id}")
-            print(f"  {'='*60}")
-            print(f"  • Timeframes processed: {timeframes}")
-            print(f"  • Total symbols across all timeframes: {total_symbols}")
-            print(f"  • Successful: {successful_symbols}")
-            print(f"  • Failed: {failed_symbols}")
-            print(f"  • Bullish signals: {stats['bullish_signals']}")
-            print(f"  • Bearish signals: {stats['bearish_signals']}")
-            print(f"  • Total signals: {stats['total_signals']}")
-            print(f"  {'='*60}")
-            
-            # Create a master signals file combining all timeframes
-            master_signals_file = prices_dir / "directional_signals_all.json"
             master_data = {
-                "account_balance": account_balance,
-                "account_currency": account_currency,
+                "account_balance": 10000.0,
+                "account_currency": "USD",
+                "strategy": strategy_name,
                 "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "timeframes_processed": timeframes,
                 "total_signals": stats['total_signals'],
-                "signals_by_timeframe": all_timeframes_signals
+                "pending_orders_cancelled": total_cancelled,
+                "signals_summary": {
+                    "bullish_sell_stop": stats['bullish_signals'],
+                    "bearish_buy_stop": stats['bearish_signals'],
+                    "skipped_duplicates": skipped_signals
+                },
+                "signals_detail": all_signals
             }
             
             with open(master_signals_file, 'w', encoding='utf-8') as f:
                 json.dump(master_data, f, indent=4)
             
+            print(f"\n  📁 Master summary saved to: {master_signals_file}")
+            print(f"  📝 Candle time records saved to: {records_file}")
         else:
-            print(f"\n  ⚠️ No signals generated for {inv_id}")
+            print(f"\n  ⚠️ No signals generated for user {inv_id}")
     
     return stats
-
+    
 def debug_print_all_broker_symbols():
     """
     Connects to the currently active MT5 terminal and prints 
@@ -3308,7 +3472,7 @@ def get_normalized_symbol(record_symbol, risk_keys=None):
 def deduplicate_orders(inv_id=None):
     """
     Scans all pending_orders/limit_orders.json, pending_orders/limit_orders_backup.json, 
-    and pending_orders/signals.json files and removes duplicate orders based on: 
+    and pending_orders/limit_orders.json files and removes duplicate orders based on: 
     Symbol, Timeframe, Order Type, and Entry Price.
     
     Args:
@@ -3451,8 +3615,8 @@ def deduplicate_orders(inv_id=None):
                 except Exception as e:
                     print(f"  └─ ❌ Error processing {limit_backup_file}: {e}")
 
-            # Process signals.json
-            signals_file = pending_folder / "signals.json"
+            # Process limit_orders.json
+            signals_file = pending_folder / "limit_orders.json"
             if signals_file.exists():
                 try:
                     with open(signals_file, 'r', encoding='utf-8') as f:
@@ -3489,7 +3653,7 @@ def deduplicate_orders(inv_id=None):
                             any_duplicates_removed = True
                             
                             folder_name = pending_folder.parent.name
-                            print(f"  └─ 📄 {folder_name}/signals.json - Removed {removed} duplicates")
+                            print(f"  └─ 📄 {folder_name}/limit_orders.json - Removed {removed} duplicates")
 
                 except Exception as e:
                     print(f"  └─ ❌ Error processing {signals_file}: {e}")
@@ -3502,7 +3666,7 @@ def deduplicate_orders(inv_id=None):
             if investor_limit_backup_duplicates > 0:
                 print(f"      • limit_orders_backup.json: Cleaned {investor_limit_backup_files_cleaned} files | Removed {investor_limit_backup_duplicates} duplicates")
             if investor_signal_duplicates > 0:
-                print(f"      • signals.json: Cleaned {investor_signal_files_cleaned} files | Removed {investor_signal_duplicates} duplicates")
+                print(f"      • limit_orders.json: Cleaned {investor_signal_files_cleaned} files | Removed {investor_signal_duplicates} duplicates")
         else:
             print(f"  └─ ✅ No duplicates found in any order files")
 
@@ -3518,7 +3682,7 @@ def deduplicate_orders(inv_id=None):
         print(f"\n Breakdown by file type:")
         print(f"   • limit_orders.json:        {total_limit_files_cleaned} files | {total_limit_duplicates} duplicates")
         print(f"   • limit_orders_backup.json: {total_limit_backup_files_cleaned} files | {total_limit_backup_duplicates} duplicates")
-        print(f"   • signals.json:             {total_signal_files_cleaned} files | {total_signal_duplicates} duplicates")
+        print(f"   • limit_orders.json:             {total_signal_files_cleaned} files | {total_signal_duplicates} duplicates")
     else:
         print(" ✅ Everything was already clean - no duplicates found!")
     print(f"{'='*33}\n")
@@ -3797,7 +3961,7 @@ def detect_unauthorized_action(inv_id=None):
 def filter_unauthorized_symbols(inv_id=None):
     """
     Verifies and filters pending order files based on allowed symbols defined in accountmanagement.json.
-    Now filters both limit_orders.json and signals.json files, removing any entries with unauthorized symbols.
+    Now filters both limit_orders.json and limit_orders.json files, removing any entries with unauthorized symbols.
     Matches sanitized versions of symbols to handle broker suffixes (e.g., EURUSDm vs EURUSD).
     
     Args:
@@ -3906,8 +4070,8 @@ def filter_unauthorized_symbols(inv_id=None):
                     except Exception as e:
                         print(f"    └─ ❌ Error processing {limit_file}: {e}")
 
-                # Process signals.json
-                signals_file = pending_folder / "signals.json"
+                # Process limit_orders.json
+                signals_file = pending_folder / "limit_orders.json"
                 if signals_file.exists():
                     try:
                         with open(signals_file, 'r', encoding='utf-8') as f:
@@ -3935,10 +4099,10 @@ def filter_unauthorized_symbols(inv_id=None):
                                 any_symbols_removed = True
                                 
                                 folder_name = pending_folder.parent.name
-                                print(f"    └─ 📄 {folder_name}/signals.json - Removed {removed} unauthorized entries")
+                                print(f"    └─ 📄 {folder_name}/limit_orders.json - Removed {removed} unauthorized entries")
                             elif original_count > 0:
                                 folder_name = pending_folder.parent.name
-                                print(f"    └─ ✅ {folder_name}/signals.json - All symbols authorized ({original_count} entries)")
+                                print(f"    └─ ✅ {folder_name}/limit_orders.json - All symbols authorized ({original_count} entries)")
 
                     except Exception as e:
                         print(f"    └─ ❌ Error processing {signals_file}: {e}")
@@ -3949,7 +4113,7 @@ def filter_unauthorized_symbols(inv_id=None):
                 if investor_limit_removed > 0:
                     print(f"      • limit_orders.json: Cleaned {investor_limit_files_cleaned} files | Removed {investor_limit_removed} unauthorized entries")
                 if investor_signal_removed > 0:
-                    print(f"      • signals.json: Cleaned {investor_signal_files_cleaned} files | Removed {investor_signal_removed} unauthorized entries")
+                    print(f"      • limit_orders.json: Cleaned {investor_signal_files_cleaned} files | Removed {investor_signal_removed} unauthorized entries")
             else:
                 # Check if any files were found at all
                 if pending_orders_folders:
@@ -3971,7 +4135,7 @@ def filter_unauthorized_symbols(inv_id=None):
         print(f" Total Files Modified:               {total_files_cleaned}")
         print(f"\n Breakdown by file type:")
         print(f"   • limit_orders.json:   {total_limit_files_cleaned} files | {total_limit_removed} entries removed")
-        print(f"   • signals.json:        {total_signal_files_cleaned} files | {total_signal_removed} entries removed")
+        print(f"   • limit_orders.json:        {total_signal_files_cleaned} files | {total_signal_removed} entries removed")
     else:
         if total_files_cleaned == 0:
             print(" ✅ No files needed filtering - all symbols were already authorized!")
@@ -3984,7 +4148,7 @@ def filter_unauthorized_symbols(inv_id=None):
 def filter_unauthorized_timeframes(inv_id=None):
     """
     Verifies and filters pending order files based on restricted timeframes defined in accountmanagement.json.
-    Now filters both limit_orders.json and signals.json files, removing any entries with restricted timeframes.
+    Now filters both limit_orders.json and limit_orders.json files, removing any entries with restricted timeframes.
     Matches the 'timeframe' key in order files against the 'restrict_order_from_timeframe' setting.
     
     Args:
@@ -4102,8 +4266,8 @@ def filter_unauthorized_timeframes(inv_id=None):
                     except Exception as e:
                         print(f"    └─ ❌ Error processing {limit_file}: {e}")
 
-                # Process signals.json
-                signals_file = pending_folder / "signals.json"
+                # Process limit_orders.json
+                signals_file = pending_folder / "limit_orders.json"
                 if signals_file.exists():
                     try:
                         with open(signals_file, 'r', encoding='utf-8') as f:
@@ -4131,10 +4295,10 @@ def filter_unauthorized_timeframes(inv_id=None):
                                 any_timeframes_removed = True
                                 
                                 folder_name = pending_folder.parent.name
-                                print(f"    └─ 📄 {folder_name}/signals.json - Removed {removed} restricted timeframe entries")
+                                print(f"    └─ 📄 {folder_name}/limit_orders.json - Removed {removed} restricted timeframe entries")
                             elif original_count > 0:
                                 folder_name = pending_folder.parent.name
-                                print(f"    └─ ✅ {folder_name}/signals.json - All timeframes authorized ({original_count} entries)")
+                                print(f"    └─ ✅ {folder_name}/limit_orders.json - All timeframes authorized ({original_count} entries)")
 
                     except Exception as e:
                         print(f"    └─ ❌ Error processing {signals_file}: {e}")
@@ -4145,7 +4309,7 @@ def filter_unauthorized_timeframes(inv_id=None):
                 if investor_limit_removed > 0:
                     print(f"      • limit_orders.json: Cleaned {investor_limit_files_cleaned} files | Removed {investor_limit_removed} restricted entries")
                 if investor_signal_removed > 0:
-                    print(f"      • signals.json: Cleaned {investor_signal_files_cleaned} files | Removed {investor_signal_removed} restricted entries")
+                    print(f"      • limit_orders.json: Cleaned {investor_signal_files_cleaned} files | Removed {investor_signal_removed} restricted entries")
                 print(f"     (Blocked timeframes: {', '.join(restricted_set)})")
             else:
                 # Check if any files were found at all
@@ -4168,7 +4332,7 @@ def filter_unauthorized_timeframes(inv_id=None):
         print(f" Total Files Modified:              {total_files_cleaned}")
         print(f"\n Breakdown by file type:")
         print(f"   • limit_orders.json:   {total_limit_files_cleaned} files | {total_limit_removed} entries removed")
-        print(f"   • signals.json:        {total_signal_files_cleaned} files | {total_signal_removed} entries removed")
+        print(f"   • limit_orders.json:        {total_signal_files_cleaned} files | {total_signal_removed} entries removed")
     else:
         if total_files_cleaned == 0:
             print(" ✅ No files needed filtering - no restricted timeframes found!")
@@ -4369,7 +4533,7 @@ def activate_usd_based_risk_on_empty_pricelevels(inv_id=None):
 
         known_risk_symbols = list(risk_lookup.keys())
         order_files = list(inv_folder.rglob("*/pending_orders/limit_orders.json"))
-        signals_files = list(inv_folder.rglob("*/signals/signals.json"))
+        signals_files = list(inv_folder.rglob("*/signals/limit_orders.json"))
         
         for file_list, label in [(order_files, "LIMITS"), (signals_files, "SIGNALS")]:
             for file_path in file_list:
@@ -4523,7 +4687,7 @@ def enforce_investors_risk(inv_id=None):
 
         # 4. Gather Files
         order_files = list(inv_folder.rglob("*/pending_orders/limit_orders.json"))
-        signals_files = list(inv_folder.rglob("*/signals/signals.json"))
+        signals_files = list(inv_folder.rglob("*/signals/limit_orders.json"))
         
         investor_orders_enforced = 0
         investor_files_updated = 0
@@ -5282,12 +5446,12 @@ def live_usd_risk_and_scaling(inv_id=None, callback_function=None):
                 
                 orders = unique_orders
 
-                # Clear signals.json for this specific folder to prevent stale data mixing with splits
-                signals_path = file_path.parent / "signals.json"
+                # Clear limit_orders.json for this specific folder to prevent stale data mixing with splits
+                signals_path = file_path.parent / "limit_orders.json"
                 if signals_path.exists():
                     with open(signals_path, 'w', encoding='utf-8') as f:
                         json.dump([], f)
-                    print(f"    └─ 🚿 Cleared existing signals.json for fresh split generation")
+                    print(f"    └─ 🚿 Cleared existing limit_orders.json for fresh split generation")
 
                 # --- START PROCESSING ---
                 if callback_function:
@@ -5421,7 +5585,7 @@ def live_usd_risk_and_scaling(inv_id=None, callback_function=None):
                         if is_split:
                             print(f"      └─ 🟢 Qualified & SPLIT (Total Vol: {best_volume:.2f}, Max Vol: {max_volume})")
                         else:
-                            print(f"      └─ 🟢 Qualified for signals.json (risk ${best_risk:.2f})")
+                            print(f"      └─ 🟢 Qualified for limit_orders.json (risk ${best_risk:.2f})")
                 
                 # Save cleaned and updated limit orders
                 with open(file_path, 'w', encoding='utf-8') as f:
@@ -5435,13 +5599,13 @@ def live_usd_risk_and_scaling(inv_id=None, callback_function=None):
                 
                 if file_signals:
                     try:
-                        # We already cleared signals.json at the start, so we just write the new ones
+                        # We already cleared limit_orders.json at the start, so we just write the new ones
                         with open(signals_path, 'w', encoding='utf-8') as f:
                             json.dump(file_signals, f, indent=4)
                         
-                        print(f"  └─ 📊 signals.json: Created {len(file_signals)} clean signals (splits included)")
+                        print(f"  └─ 📊 limit_orders.json: Created {len(file_signals)} clean signals (splits included)")
                     except Exception as e:
-                        print(f"  └─ ❌ Error writing signals.json: {e}")
+                        print(f"  └─ ❌ Error writing limit_orders.json: {e}")
                 
             except Exception as e:
                 print(f"  └─ ❌ Error processing {file_path}: {e}")
@@ -5462,8 +5626,8 @@ def live_usd_risk_and_scaling(inv_id=None, callback_function=None):
 
 def apply_default_prices(inv_id=None, callback_function=None):
     """
-    Applies default prices from limit_orders_backup.json to signals.json when default_price is true.
-    Copies exit/target prices from backup to matching orders in signals.json, handling symbol normalization.
+    Applies default prices from limit_orders_backup.json to limit_orders.json when default_price is true.
+    Copies exit/target prices from backup to matching orders in limit_orders.json, handling symbol normalization.
     
     Args:
         inv_id (str, optional): Specific investor ID to process. If None, processes all investors.
@@ -5552,11 +5716,11 @@ def apply_default_prices(inv_id=None, callback_function=None):
         # 4. Process each backup file
         for backup_path in backup_files:
             folder_path = backup_path.parent.parent  # Gets the strategy folder (e.g., double-levels)
-            signals_path = backup_path.parent / "signals.json"  # Same directory as backup
+            signals_path = backup_path.parent / "limit_orders.json"  # Same directory as backup
             
-            # Check if signals.json exists
+            # Check if limit_orders.json exists
             if not signals_path.exists():
-                print(f"  └─ ⚠️  No signals.json found in {backup_path.parent} (same folder as backup), skipping")
+                print(f"  └─ ⚠️  No limit_orders.json found in {backup_path.parent} (same folder as backup), skipping")
                 continue
             
             print(f"\n  └─ 📂 Processing folder: {folder_path.name}")
@@ -5751,7 +5915,7 @@ def apply_default_prices(inv_id=None, callback_function=None):
                         investor_files_updated += 1
                         total_files_updated += 1
                         
-                        print(f"    └─ 📝 Updated {signals_modified_count} orders in signals.json")
+                        print(f"    └─ 📝 Updated {signals_modified_count} orders in limit_orders.json")
                         
                         # Call callback if provided
                         if callback_function:
@@ -5770,7 +5934,7 @@ def apply_default_prices(inv_id=None, callback_function=None):
                                 print(f"      • ... and {len(modifications_log) - 5} more")
                     
                     except Exception as e:
-                        print(f"    └─ ❌ Error saving signals.json: {e}")
+                        print(f"    └─ ❌ Error saving limit_orders.json: {e}")
                 else:
                     print(f"    └─ ✓ No price updates needed for signals in {folder_path.name}")
                 
@@ -5811,7 +5975,7 @@ def apply_default_prices(inv_id=None, callback_function=None):
 
 def place_usd_orders(inv_id=None):
     """
-    Places pending orders from signals.json files for investors.
+    Places pending orders from limit_orders.json files for investors.
     
     ENHANCED FEATURES:
     1. Detailed tradeshistory.json with complete order information
@@ -5819,9 +5983,10 @@ def place_usd_orders(inv_id=None):
     3. Proximity risk check against existing positions
     4. Order regulation - always cancels unauthorized orders
     5. Dynamic order types: buy_stop, sell_stop, buy_limit, sell_limit, instant_buy, instant_sell
-    6. No conversion logic - places exactly what signals.json specifies
+    6. No conversion logic - places exactly what limit_orders.json specifies
     7. Uses 'volume' field from signals (ignores deriv_ prefix)
-    8. Recursively finds signals.json in ALL strategy subfolders
+    8. Recursively finds limit_orders.json in ALL strategy subfolders
+    9. PRESERVES SYMBOL SUFFIXES (+, .m, etc.) - no filtering
     """
     
     # --- SUB-FUNCTION 1: CHECK AUTHORIZATION STATUS ---
@@ -5906,7 +6071,7 @@ def place_usd_orders(inv_id=None):
         if not is_buy and not is_sell:
             return False, None, 0, 0
         
-        # Filter positions for this symbol
+        # Filter positions for this symbol (exact match, including suffixes)
         symbol_positions = [p for p in existing_positions if p.symbol == symbol]
         if not symbol_positions:
             return False, None, 0, 0
@@ -6159,22 +6324,23 @@ def place_usd_orders(inv_id=None):
             print(f"      ❌ Error in sync_and_save_history: {e}")
             return False
 
-    # --- SUB-FUNCTION 7: COLLECT ORDERS FROM SIGNALS (UPDATED) ---
+    # --- SUB-FUNCTION 7: COLLECT ORDERS FROM SIGNALS (UPDATED - NO SYMBOL FILTERING) ---
     def collect_orders_from_signals(investor_root, resolution_cache):
         """
-        Collect all orders from signals.json files in ALL strategy subfolders.
-        Path structure: investors/{investor_id}/{strategy_name}/signals.json
+        Collect all orders from limit_orders.json files in ALL strategy subfolders.
+        Path structure: investors/{investor_id}/{strategy_name}/limit_orders.json
+        PRESERVES ORIGINAL SYMBOL NAMES INCLUDING SUFFIXES - NO NORMALIZATION
         """
         entries_with_paths = []
         
-        # Find ALL signals.json files in any subfolder of investor_root
-        signals_files = list(investor_root.rglob("signals.json"))
+        # Find ALL limit_orders.json files in any subfolder of investor_root
+        signals_files = list(investor_root.rglob("limit_orders.json"))
         
         if not signals_files:
-            print(f"    ℹ️  No signals.json files found in {investor_root} or its subfolders")
+            print(f"    ℹ️  No limit_orders.json files found in {investor_root} or its subfolders")
             return []
         
-        print(f"    📁 Found {len(signals_files)} signals.json files in strategy folders:")
+        print(f"    📁 Found {len(signals_files)} limit_orders.json files in strategy folders:")
         
         for signals_path in signals_files:
             # Extract strategy name from parent folder
@@ -6186,28 +6352,49 @@ def place_usd_orders(inv_id=None):
                     data = json.load(f)
                 
                 if not data:
-                    print(f"         ⚠️  Empty signals.json file")
+                    print(f"         ⚠️  Empty limit_orders.json file")
                     continue
                 
                 print(f"         📡 Found {len(data)} signals")
                 
                 for entry in data:
-                    # Normalize symbol
+                    # Get the raw symbol exactly as specified in the JSON
                     raw_symbol = entry.get("symbol", "")
+                    
+                    # CRITICAL FIX: Do NOT normalize or modify the symbol
+                    # Keep it exactly as provided, including suffixes like +, .m, etc.
+                    # Only check if the symbol exists in MT5 as-is
+                    
                     if raw_symbol in resolution_cache:
+                        # Use cached result
+                        if resolution_cache[raw_symbol] is None:
+                            print(f"         ⚠️  Symbol '{raw_symbol}' not available in MT5 (cached)")
+                            continue
                         normalized_symbol = resolution_cache[raw_symbol]
                     else:
-                        normalized_symbol = get_normalized_symbol(raw_symbol)
-                        resolution_cache[raw_symbol] = normalized_symbol
+                        # Check if symbol exists in MT5 EXACTLY as provided
+                        symbol_info = mt5.symbol_info(raw_symbol)
+                        if symbol_info is None:
+                            # Try to select it first
+                            if not mt5.symbol_select(raw_symbol, True):
+                                print(f"         ⚠️  Symbol '{raw_symbol}' not found in MT5 - skipping signal")
+                                resolution_cache[raw_symbol] = None
+                                continue
+                        # Symbol exists, use it exactly as provided
+                        resolution_cache[raw_symbol] = raw_symbol
+                        normalized_symbol = raw_symbol
                     
                     entry['symbol'] = normalized_symbol
                     entry['strategy_name'] = strategy_name  # Add strategy name to entry
+                    entry['original_symbol'] = raw_symbol  # Preserve original for debugging
                     
                     entries_with_paths.append({
                         'data': entry,
                         'path': signals_path,
                         'strategy': strategy_name
                     })
+                    
+                    print(f"            ✓ Using symbol: {normalized_symbol} (original: {raw_symbol})")
                     
             except json.JSONDecodeError as e:
                 print(f"         ❌ Invalid JSON in {signals_path}: {e}")
@@ -6234,7 +6421,7 @@ def place_usd_orders(inv_id=None):
         magic_number = int(order_data.get('magic', int(investor_root.name) if investor_root.name.isdigit() else 123456))
         strategy_name = order_data.get('strategy_name', 'unknown')
         
-        # Get symbol info
+        # Get symbol info - use exact symbol name
         if not mt5.symbol_select(symbol, True):
             return False, None, f"Failed to select symbol {symbol}"
         
@@ -6253,7 +6440,7 @@ def place_usd_orders(inv_id=None):
         if mt5_order_type is None:
             return False, None, f"Invalid order type: {order_type}"
         
-        # Generate cache key
+        # Generate cache key (includes exact symbol with suffix)
         cache_key = f"{symbol}_{mt5_order_type}_{entry_price}_{volume}"
         
         # Check per-order cache
@@ -6480,7 +6667,7 @@ def place_usd_orders(inv_id=None):
     print("="*80)
     
     return any_orders_placed
- 
+
 def check_pending_orders_risk(inv_id=None):
     """
     Function 3: Validates live pending orders against the account's current risk bucket.
@@ -8944,7 +9131,7 @@ def apply_dynamic_breakeven(inv_id=None):
 
 
 # real accounts 
-def process_single_investor(inv_id):
+def process_single_invest(inv_id):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor ID.
     """
@@ -9066,8 +9253,10 @@ def process_single_investor(inv_id):
 
         # --- EXECUTION PIPELINE ---
         # If any of these functions have internal delays, they won't affect other investors
-        fetch_ohlc_data_for_investor(inv_id=inv_id)
-        directional_bias(inv_id=inv_id)
+        #accountmanagement_manager(inv_id=inv_id)
+        #fetch_ohlc_data_for_investor(inv_id=inv_id)
+        #directional_bias(inv_id=inv_id)
+        place_usd_orders(inv_id=inv_id)
 
         mt5.shutdown()
         account_stats["success"] = True
@@ -9123,7 +9312,7 @@ def process_single_investor(inv_id):
     
     return account_stats
 
-def process_single_invest(inv_id):
+def process_single_investor(inv_id):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor ID.
     """
@@ -9249,7 +9438,9 @@ def process_single_invest(inv_id):
         update_verified_investors_file()
         get_requirements(inv_id=inv_id)
         
-        accountmanagement_manager(inv_id=inv_id)
+        fetch_ohlc_data_for_investor(inv_id=inv_id)
+        directional_bias(inv_id=inv_id)
+        #accountmanagement_manager(inv_id=inv_id)
         deduplicate_orders(inv_id=inv_id)
         filter_unauthorized_symbols(inv_id=inv_id)
         filter_unauthorized_timeframes(inv_id=inv_id)

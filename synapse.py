@@ -17707,7 +17707,7 @@ def place_grid_orders_parallel():
     return 
 
 if __name__ == "__main__":
-   move_verified_investors()
+   place_grid_orders_parallel()
     
 
          

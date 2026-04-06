@@ -5,6 +5,6 @@
         "SERVER": "Bybit-Live",
         "INVESTED_WITH": "bybit1_prices",
         "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Bybit 1\\terminal64.exe",
-        "MESSAGE": "unexpected error: module 'MetaTrader5' has no attribute 'TIMEFRAME_M45'"
+        "MESSAGE": "unexpected error: not enough values to unpack (expected 4, got 3)"
     }
 }

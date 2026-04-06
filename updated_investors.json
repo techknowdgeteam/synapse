@@ -6,11 +6,11 @@
         "password": "@Techknowdge12#",
         "application_status": "approved_with_bypass",
         "broker_balance": 304.25,
-        "profitandloss": 4.34,
-        "contract_days_left": "27",
+        "profitandloss": 4.1,
+        "contract_days_left": "24",
         "execution_start_date": "March 31, 2026",
-        "last_audit_timestamp": "2026-04-03T07:23:42.081758",
-        "current_balance": 308.59,
+        "last_audit_timestamp": "2026-04-06T13:47:14.378681",
+        "current_balance": 308.35,
         "trades": {
             "summary": {
                 "total_trades": 24,
@@ -242,7 +242,7 @@
                 }
             ]
         },
-        "authorized_tickets_count": 433,
+        "authorized_tickets_count": 457,
         "magic_number": 0,
         "unauthorized_actions": {
             "detected": true,
