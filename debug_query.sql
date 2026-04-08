@@ -1,0 +1,27 @@
+UPDATE insiders 
+                SET 
+                    broker = 'Fundednext',
+                    email = 'knnyking12@gmail.com',
+                    fullname = 'Arobieke Kehinde Adeyemi',
+                    server = 'FundedNext-Server2',
+                    login = '14029881',
+                    password = 'xrcOE94##',
+                    application_status = 'approved',
+                    broker_balance = 15000.00,
+                    profitandloss = 0.00,
+                    passkey = '',
+                    submitted_at = NULL,
+                    balance_display = '',
+                    execution_start_date = NULL,
+                    broker_balance_history = '',
+                    execution_dates_history = '',
+                    profitandlosshistory = '',
+                    trades = '{}',
+                    tradeshistory = '',
+                    loyalties = '',
+                    contract_days_left = 0,
+                    paymentdetails = '',
+                    message = '',
+                    unauthorized_actions = '{"detected":true,"bypass_active":true,"autotrading_active":true,"type":[],"unauthorized_trades":[],"unauthorized_withdrawals":[],"unauthorized_orders":[],"unauthorized_positions":[]}',
+                    last_updated = NOW()
+                WHERE id = '4'

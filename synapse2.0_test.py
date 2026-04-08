@@ -25,10 +25,10 @@ import random
 
 
 INV_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors"
-UPDATED_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\updated_investors.json"
-INVESTOR_USERS = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json"
-VERIFIED_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\verified_investors.json"
-ISSUES_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\issues_investors.json"
+UPDATED_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\updated_demo_investors.json"
+INVESTOR_USERS = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\demo_investors.json"
+VERIFIED_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\verified_demo_investors.json"
+ISSUES_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\issues_demo_investors.json"
 NORMALIZE_SYMBOLS_PATH = r"C:\xampp\htdocs\synapse\synarex\symbols_normalization.json"
 DEFAULT_ACCOUNTMANAGEMENT = r"C:\xampp\htdocs\synapse\synarex\default_accountmanagement.json"
 DEFAULT_PATH = r"C:\xampp\htdocs\synapse\synarex"
@@ -49,7 +49,7 @@ TIMEFRAME_MAP = {
     
 
 def load_investors_dictionary():
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json"
+    BROKERS_JSON_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\demo_investors.json"
     """Load brokers config from JSON file with error handling and fallback."""
     if not os.path.exists(BROKERS_JSON_PATH):
         print(f"CRITICAL: {BROKERS_JSON_PATH} NOT FOUND! Using empty config.", "CRITICAL")
@@ -69,10 +69,10 @@ def load_investors_dictionary():
         return data
 
     except json.JSONDecodeError as e:
-        print(f"Invalid JSON in investors.json: {e}", "CRITICAL")
+        print(f"Invalid JSON in demo_investors.json: {e}", "CRITICAL")
         return {}
     except Exception as e:
-        print(f"Failed to load investors.json: {e}", "CRITICAL")
+        print(f"Failed to load demo_investors.json: {e}", "CRITICAL")
         return {}
 usersdictionary = load_investors_dictionary()
 
@@ -80,8 +80,8 @@ usersdictionary = load_investors_dictionary()
 #--VERIFICATIONS AND AUTHORIZATIONS--
 def move_verified_investors():
     """
-    Moves verified investors from verified_investors.json to:
-    Step 1: investors.json (with limited fields: LOGIN_ID, PASSWORD, SERVER, INVESTED_WITH, TERMINAL_PATH)
+    Moves verified investors from verified_demo_investors.json to:
+    Step 1: demo_investors.json (with limited fields: LOGIN_ID, PASSWORD, SERVER, INVESTED_WITH, TERMINAL_PATH)
     Step 2: Create activities.json directly in investor root folder (NEW PATH STRUCTURE)
     Step 3: Create empty tradeshistory.json if it doesn't exist
     
@@ -102,7 +102,7 @@ def move_verified_investors():
     
     For Step 3, tradeshistory.json is created as an empty array if it doesn't exist.
     
-    NOTE: Investors are NOT removed from verified_investors.json after processing
+    NOTE: Investors are NOT removed from verified_demo_investors.json after processing
     """
     
     print(f"\n{'='*70}")
@@ -141,21 +141,21 @@ def move_verified_investors():
     print(f"\n📋 Found {len(verified_data)} investors in verified list")
     
     # ============================================
-    # STEP 1: Move to investors.json with limited fields
+    # STEP 1: Move to demo_investors.json with limited fields
     # ============================================
     print(f"\n{'─'*70}")
-    print(f"🔹 STEP 1: ADDING TO INVESTORS.JSON")
+    print(f"🔹 STEP 1: ADDING TO demo_investors.json")
     print(f"{'─'*70}")
     
-    # Load existing investors.json if it exists
+    # Load existing demo_investors.json if it exists
     investors_data = {}
     if os.path.exists(INVESTOR_USERS):
         try:
             with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
                 investors_data = json.load(f)
-            print(f"📄 Loaded existing investors.json with {len(investors_data)} investors")
+            print(f"📄 Loaded existing demo_investors.json with {len(investors_data)} investors")
         except Exception as e:
-            print(f"⚠️ Error loading existing investors.json: {e}")
+            print(f"⚠️ Error loading existing demo_investors.json: {e}")
             investors_data = {}
     
     investors_updated = []
@@ -199,7 +199,7 @@ def move_verified_investors():
         investors_data[inv_id] = minimal_investor
         investors_updated.append(inv_id)
     
-    # Save updated investors.json
+    # Save updated demo_investors.json
     if investors_updated:
         os.makedirs(os.path.dirname(INVESTOR_USERS), exist_ok=True)
         with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
@@ -480,7 +480,7 @@ def move_verified_investors():
     print(f"📊 SUMMARY")
     print(f"{'─'*70}")
     
-    print(f"\n🔹 STEP 1 - INVESTORS.JSON:")
+    print(f"\n🔹 STEP 1 - demo_investors.json:")
     print(f"   ✅ Added/Updated: {len(investors_updated)}")
     if investors_updated:
         print(f"      {', '.join(investors_updated[:3])}{'...' if len(investors_updated) > 3 else ''}")
@@ -524,7 +524,7 @@ def move_verified_investors():
             print(f"      • {error}")
     
     print(f"\n🔹 VERIFIED LIST:")
-    print(f"   📁 All {len(verified_data)} investors remain in verified_investors.json")
+    print(f"   📁 All {len(verified_data)} investors remain in verified_demo_investors.json")
     
     print(f"\n{'='*70}")
     print(f"✅ MOVE COMPLETE".center(70))
@@ -534,11 +534,11 @@ def move_verified_investors():
 
 def update_verified_investors_file():
     """
-    Updates verified_investors.json by:
+    Updates verified_demo_investors.json by:
     1. Removing the MESSAGE field after moving them to activities.json
     2. Verifying that investors have the required files at INV_PATH/{investor_id}/
     3. Moving investors to issues if they're missing critical files
-    4. Removing investors from verified_investors.json if they have any issues
+    4. Removing investors from verified_demo_investors.json if they have any issues
     """
     print("\n" + "="*80)
     print("📋 CLEANING AND VERIFYING INVESTORS FILE")
@@ -557,7 +557,7 @@ def update_verified_investors_file():
         with open(verified_investors_path, 'r', encoding='utf-8') as f:
             verified_investors = json.load(f)
     except Exception as e:
-        print(f" Error reading verified_investors.json: {e}")
+        print(f" Error reading verified_demo_investors.json: {e}")
         return False
     
     # Load updated_investors if exists
@@ -602,7 +602,7 @@ def update_verified_investors_file():
                 investor_data_copy['verified_status'] = 'folder_missing'
                 issues_investors[inv_id] = investor_data_copy
                 investors_moved_to_issues.append(inv_id)
-                print(f"  ⚠️  Added to issues_investors.json (folder missing)")
+                print(f"  ⚠️  Added to issues_demo_investors.json (folder missing)")
             continue
         
         # Check for required files
@@ -624,7 +624,7 @@ def update_verified_investors_file():
             issues_investors[inv_id] = investor_data_copy
             investors_moved_to_issues.append(inv_id)
             investors_to_remove.append(inv_id)
-            print(f"  ⚠️  Added to issues_investors.json (missing files)")
+            print(f"  ⚠️  Added to issues_demo_investors.json (missing files)")
             continue
         
         print(f"  ✅ All required files present: {', '.join(required_files)}")
@@ -647,7 +647,7 @@ def update_verified_investors_file():
                 issues_investors[inv_id] = investor_data_copy
                 investors_moved_to_issues.append(inv_id)
                 investors_to_remove.append(inv_id)
-                print(f"  ⚠️  Added to issues_investors.json (missing start date)")
+                print(f"  ⚠️  Added to issues_demo_investors.json (missing start date)")
                 continue
             
             # Check if tradeshistory.json exists (empty is acceptable)
@@ -706,29 +706,29 @@ def update_verified_investors_file():
     if investors_to_remove:
         for inv_id in investors_to_remove:
             if inv_id in verified_investors:
-                print(f"  🗑️  Removing {inv_id} from verified_investors.json")
+                print(f"  🗑️  Removing {inv_id} from verified_demo_investors.json")
                 del verified_investors[inv_id]
                 updated = True
     
     # Save updated files
     try:
-        # Save verified_investors.json
+        # Save verified_demo_investors.json
         with open(verified_investors_path, 'w', encoding='utf-8') as f:
             json.dump(verified_investors, f, indent=4)
         
-        # Save issues_investors.json
+        # Save issues_demo_investors.json
         with open(issues_investors_path, 'w', encoding='utf-8') as f:
             json.dump(issues_investors, f, indent=4)
         
         print(f"\n" + "="*80)
         if updated:
-            print(f"✅ Updated verified_investors.json")
+            print(f"✅ Updated verified_demo_investors.json")
             if investors_to_remove:
                 print(f"   - Removed {len(investors_to_remove)} investors with issues:")
                 for inv_id in investors_to_remove:
                     print(f"     • {inv_id}")
         else:
-            print(f"ℹ️  No changes made to verified_investors.json")
+            print(f"ℹ️  No changes made to verified_demo_investors.json")
         
         if issues_investors:
             print(f"⚠️  Issues investors file updated with {len(issues_investors)} investors")
@@ -749,7 +749,7 @@ def get_requirements(inv_id):
     Mirroring the logic of update_investor_info to find the date 
     directly in root files (new path structure). Also checks if investor balance
     meets minimum requirement from requirements.json and moves
-    them to issues_investors.json with a message if not.
+    them to issues_demo_investors.json with a message if not.
     
     Core Functions:
     1. Read execution_start_date from activities.json in root folder
@@ -759,7 +759,7 @@ def get_requirements(inv_id):
        c. If existing balance found, use it; otherwise use first deposit
        d. If existing balance < minimum requirement, add first deposit to check again
     3. Check minimum balance requirement from investor root folder
-    4. Move non-compliant investors to issues_investors.json with error messages
+    4. Move non-compliant investors to issues_demo_investors.json with error messages
     5. Update activities.json with broker_balance field (starting balance or first deposit)
     """
     execution_start_date = None
@@ -1028,7 +1028,7 @@ def get_requirements(inv_id):
                                 print(f"  ✅ Balance ${balance_to_check:.2f} MEETS minimum requirement (${min_balance})")
                             else:
                                 print(f"  ⚠️  Balance ${balance_to_check:.2f} is BELOW minimum requirement ${min_balance}")
-                                print(f"  ❌ Moving investor {inv_id} to issues_investors.json")
+                                print(f"  ❌ Moving investor {inv_id} to issues_demo_investors.json")
                                 
                                 # Move investor logic
                                 if os.path.exists(INVESTOR_USERS):
@@ -1067,9 +1067,9 @@ def get_requirements(inv_id):
                                         with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
                                             json.dump(issues_data, f, indent=4)
                                         
-                                        print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
+                                        print(f"  ✅ Successfully moved investor {inv_id} to issues_demo_investors.json")
                                     else:
-                                        print(f"  ⚠️  Investor {inv_id} not found in investors.json")
+                                        print(f"  ⚠️  Investor {inv_id} not found in demo_investors.json")
                                 
                                 return None  # Return None since investor is being moved
                         else:
@@ -1085,7 +1085,7 @@ def get_requirements(inv_id):
         else:
             # --- Handle Invalid Broker Login / No Account Info ---
             print(f"  ⚠️  Could not get account info for {inv_id}")
-            print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to invalid login")
+            print(f"  ❌ Moving investor {inv_id} to issues_demo_investors.json due to invalid login")
             
             if os.path.exists(INVESTOR_USERS):
                 with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
@@ -1120,9 +1120,9 @@ def get_requirements(inv_id):
                     with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
                         json.dump(issues_data, f, indent=4)
                     
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
+                    print(f"  ✅ Successfully moved investor {inv_id} to issues_demo_investors.json")
                 else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
+                    print(f"  ⚠️  Investor {inv_id} not found in demo_investors.json")
             
             return None
 
@@ -1744,15 +1744,15 @@ def check_and_record_authorized_actions(inv_id=None):
 
 def update_investor_info(inv_id=None):
     """
-    Updates investor information in UPDATED_INVESTORS.json including:
+    Updates investor information in UPDATED_demo_investors.json including:
     - Balance at execution start date (from activities.json)
     - P&L from authorized trades only
     - Trade statistics (won/lost) with negative signs for losses
     - Detailed authorized closed trades list (with buy/sell type)
     - Unauthorized actions detection
     
-    Investors with unauthorized actions (and no bypass) are moved to issues_investors.json
-    When investors are added to updated_investors.json, their application_status is set to "approved"
+    Investors with unauthorized actions (and no bypass) are moved to issues_demo_investors.json
+    When investors are added to updated_demo_investors.json, their application_status is set to "approved"
     """
     print("\n" + "="*80)
     print("📊 UPDATING INVESTOR INFORMATION")
@@ -1991,7 +1991,7 @@ def update_investor_info(inv_id=None):
         if unauthorized_detected:
             if bypass_active:
                 print(f"\n   ⚠️  UNAUTHORIZED ACTIONS DETECTED BUT BYPASS ACTIVE")
-                print(f"      → Keeping in updated_investors.json (bypass enabled)")
+                print(f"      → Keeping in updated_demo_investors.json (bypass enabled)")
                 should_move_to_issues = False
                 investor_info['application_status'] = "approved_with_bypass"
                 investor_info['bypass_note'] = "Unauthorized actions detected but bypass is active"
@@ -2003,7 +2003,7 @@ def update_investor_info(inv_id=None):
                 print(f"      → Reason: {issue_message}")
         else:
             print(f"\n   ✅ NO UNAUTHORIZED ACTIONS DETECTED")
-            print(f"      → Keeping in updated_investors.json")
+            print(f"      → Keeping in updated_demo_investors.json")
             investor_info['application_status'] = "approved"
         
         # ============================================================
@@ -2016,16 +2016,16 @@ def update_investor_info(inv_id=None):
             # Remove from updated_investors if exists
             if user_brokerid in updated_investors:
                 del updated_investors[user_brokerid]
-                print(f"   🗑️  Removed from updated_investors.json")
+                print(f"   🗑️  Removed from updated_demo_investors.json")
             
             # Add to issues_investors
             issues_investors[user_brokerid] = investor_info
-            print(f"   📝 Added to issues_investors.json")
+            print(f"   📝 Added to issues_demo_investors.json")
             
         else:
             # Update or add to updated_investors
             updated_investors[user_brokerid] = investor_info
-            print(f"\n   ✅ INVESTOR SUMMARY (Added to updated_investors.json):")
+            print(f"\n   ✅ INVESTOR SUMMARY (Added to updated_demo_investors.json):")
             print(f"      • Application Status: {investor_info['application_status']}")
             print(f"      • Starting Balance: ${investor_info['broker_balance']:.2f}")
             print(f"      • Current Balance: ${investor_info['current_balance']:.2f}")
@@ -2044,9 +2044,9 @@ def update_investor_info(inv_id=None):
     try:
         with open(updated_investors_path, 'w', encoding='utf-8') as f:
             json.dump(updated_investors, f, indent=4)
-        print(f"\n✅ Saved updated_investors.json with {len(updated_investors)} investors")
+        print(f"\n✅ Saved updated_demo_investors.json with {len(updated_investors)} investors")
     except Exception as e:
-        print(f"\n❌ Failed to save updated_investors.json: {e}")
+        print(f"\n❌ Failed to save updated_demo_investors.json: {e}")
     
     # ============================================================
     # SAVE ISSUES INVESTORS JSON
@@ -2054,9 +2054,9 @@ def update_investor_info(inv_id=None):
     try:
         with open(issues_investors_path, 'w', encoding='utf-8') as f:
             json.dump(issues_investors, f, indent=4)
-        print(f"✅ Saved issues_investors.json with {len(issues_investors)} investors")
+        print(f"✅ Saved issues_demo_investors.json with {len(issues_investors)} investors")
     except Exception as e:
-        print(f"❌ Failed to save issues_investors.json: {e}")
+        print(f"❌ Failed to save issues_demo_investors.json: {e}")
     
     # ============================================================
     # FINAL SUMMARY
@@ -2109,7 +2109,7 @@ def fetch_ohlc_data_for_investor(inv_id):
             
     def load_investor_users():
         """Load investor users config from JSON file."""
-        INVESTOR_USERS_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json"
+        INVESTOR_USERS_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\demo_investors.json"
         
         if not os.path.exists(INVESTOR_USERS_PATH):
             print(f"CRITICAL: {INVESTOR_USERS_PATH} NOT FOUND! Using empty config.")
@@ -2136,10 +2136,10 @@ def fetch_ohlc_data_for_investor(inv_id):
             return data
 
         except json.JSONDecodeError as e:
-            print(f"Invalid JSON in investors.json: {e}")
+            print(f"Invalid JSON in demo_investors.json: {e}")
             return {}
         except Exception as e:
-            print(f"Failed to load investors.json: {e}")
+            print(f"Failed to load demo_investors.json: {e}")
             return {}
     
     def load_accountmanagement(investor_id):
@@ -2531,7 +2531,7 @@ def fetch_ohlc_data_for_investor(inv_id):
         # Step 2: Get investor config
         investor_cfg = investor_users.get(inv_id)
         if not investor_cfg:
-            print(f"  ❌  Investor {inv_id} | Config not found in investors.json")
+            print(f"  ❌  Investor {inv_id} | Config not found in demo_investors.json")
             result['errors'].append("Investor config not found")
             return result
         
@@ -2711,7 +2711,7 @@ def directional_bias(inv_id=None):
             print(f" [{investor_id}] 📈 Risk/Reward: {risk_reward}")
             
             # Get target folder and strategy name from investor config
-            investor_users_path = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json")
+            investor_users_path = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\demo_investors.json")
             target_folder = None
             strategy_name = None
             
@@ -11154,317 +11154,76 @@ def apply_dynamic_breakeven(inv_id=None):
     print(f"\n{'='*10} 🏁 DYNAMIC BREAKEVEN MONITORING COMPLETE {'='*10}\n")
     return stats
 
+
 # real accounts 
-def process_single_invest(inv_id):
+def process_single_invest(inv_folder):
     """
-    WORKER FUNCTION: Handles the entire pipeline for ONE investor ID.
+    WORKER FUNCTION: Handles the entire pipeline for ONE investor.
+    Sequential execution without console output.
     """
-    account_stats = {"inv_id": inv_id, "success": False}
+    inv_id = inv_folder.name
     
-    try:
-        with open(INVESTOR_USERS, 'r') as f:
-            investor_users = json.load(f)
-        broker_cfg = investor_users.get(inv_id)
-    except Exception as e:
-        print(f" [{inv_id}] ❌ JSON Read Error: {e}")
-        return account_stats
-
+    account_stats = {
+        "inv_id": inv_id, 
+        "success": False, 
+        "price_collection_stats": {},
+        "candle_fetch_stats": {},
+        "crosser_analysis_stats": {},
+        "trapped_analysis_stats": {},
+        "liquidator_analysis_stats": {},
+        "ranging_analysis_stats": {},
+        "order_placement_stats": {},
+        "risk_correction_stats": {},
+        "risk_audit_stats": {},
+        "symbols_filtered": 0,
+        "orders_filtered": 0,
+        "symbols_processed": 0,
+        "symbols_successful": 0,
+        "orders_placed": 0,
+        "counter_orders_placed": 0,
+        "total_active_orders": 0,
+        "orders_adjusted": 0,
+        "orders_removed": 0,
+        "current_candle_forming": False,
+        "bid_wins": 0,
+        "ask_wins": 0,
+        "trapped_candles_found": 0,
+        "symbols_with_trapped": 0,
+        "symbols_with_liquidator": 0,
+        "liquidator_candles_found": 0,
+        "bullish_liquidators": 0,
+        "bearish_liquidators": 0,
+        "symbols_ranging": 0,
+        "avg_ranging_cycles": 0
+    }
+    
+    broker_cfg = usersdictionary.get(inv_id)
     if not broker_cfg:
         return account_stats
 
-    # Small jitter to prevent OS file-lock collisions when launching multiple .exe files
-    time.sleep(random.uniform(0.1, 1.5)) 
+    import random
+    import time
+    time.sleep(random.uniform(0.1, 2.0)) 
     
     login_id = int(broker_cfg['LOGIN_ID'])
     mt5_path = broker_cfg["TERMINAL_PATH"]
-    
+
     try:
-        # Increase timeout slightly but keep it non-blocking for other processes
-        # If this fails, it only kills this specific worker.
-        if not mt5.initialize(path=mt5_path, timeout=60000): # 60 sec limit
-            print(f" [{inv_id}] ❌ MT5 Init Timeout/Failed")
-            
-            # --- MOVE TO ISSUES_INVESTORS ON INIT FAILURE ---
-            print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to MT5 initialization failure")
-            
-            if os.path.exists(INVESTOR_USERS):
-                with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
-                    investors_data = json.load(f)
-                
-                investor_data_to_move = None
-                if isinstance(investors_data, list):
-                    for i, inv in enumerate(investors_data):
-                        if inv_id in inv:
-                            investor_data_to_move = inv[inv_id]
-                            investors_data.pop(i)
-                            break
-                else:
-                    if inv_id in investors_data:
-                        investor_data_to_move = investors_data[inv_id]
-                        del investors_data[inv_id]
-                
-                if investor_data_to_move:
-                    # Specific message for MT5 initialization failure
-                    investor_data_to_move['MESSAGE'] = "invalid broker login please check your login details"
-                    
-                    with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
-                        json.dump(investors_data, f, indent=4)
-                    
-                    issues_data = {}
-                    if os.path.exists(ISSUES_INVESTORS):
-                        try:
-                            with open(ISSUES_INVESTORS, 'r', encoding='utf-8') as f:
-                                issues_data = json.load(f)
-                        except: issues_data = {}
-                    
-                    issues_data[inv_id] = investor_data_to_move
-                    with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
-                        json.dump(issues_data, f, indent=4)
-                    
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
-                else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
-            
-            mt5.shutdown()
+        if not mt5.initialize(path=mt5_path, timeout=180000):
             return account_stats
 
-        if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
-            print(f" [{inv_id}] ❌ Login failed")
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
+                mt5.shutdown()
+                return account_stats
             
-            # --- MOVE TO ISSUES_INVESTORS ON LOGIN FAILURE ---
-            print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to login failure")
-            
-            if os.path.exists(INVESTOR_USERS):
-                with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
-                    investors_data = json.load(f)
-                
-                investor_data_to_move = None
-                if isinstance(investors_data, list):
-                    for i, inv in enumerate(investors_data):
-                        if inv_id in inv:
-                            investor_data_to_move = inv[inv_id]
-                            investors_data.pop(i)
-                            break
-                else:
-                    if inv_id in investors_data:
-                        investor_data_to_move = investors_data[inv_id]
-                        del investors_data[inv_id]
-                
-                if investor_data_to_move:
-                    # Specific message for login failure
-                    investor_data_to_move['MESSAGE'] = "invalid broker login please check your login details"
-                    
-                    with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
-                        json.dump(investors_data, f, indent=4)
-                    
-                    issues_data = {}
-                    if os.path.exists(ISSUES_INVESTORS):
-                        try:
-                            with open(ISSUES_INVESTORS, 'r', encoding='utf-8') as f:
-                                issues_data = json.load(f)
-                        except: issues_data = {}
-                    
-                    issues_data[inv_id] = investor_data_to_move
-                    with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
-                        json.dump(issues_data, f, indent=4)
-                    
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
-                else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
-            
-            mt5.shutdown()
-            return account_stats
-
-        # --- EXECUTION PIPELINE ---
-        # If any of these functions have internal delays, they won't affect other investors
-        #accountmanagement_manager(inv_id=inv_id)
-        fetch_ohlc_data_for_investor(inv_id=inv_id)
-        directional_bias(inv_id=inv_id)
-        place_usd_orders(inv_id=inv_id)
-
-        mt5.shutdown()
-        account_stats["success"] = True
-        
-    except Exception as e:
-        print(f" [{inv_id}] ❌ Pipeline Error: {e}")
-        
-        # --- MOVE TO ISSUES_INVESTORS ON ANY UNEXPECTED ERROR ---
-        print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to unexpected error: {e}")
-        
-        try:
-            if os.path.exists(INVESTOR_USERS):
-                with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
-                    investors_data = json.load(f)
-                
-                investor_data_to_move = None
-                if isinstance(investors_data, list):
-                    for i, inv in enumerate(investors_data):
-                        if inv_id in inv:
-                            investor_data_to_move = inv[inv_id]
-                            investors_data.pop(i)
-                            break
-                else:
-                    if inv_id in investors_data:
-                        investor_data_to_move = investors_data[inv_id]
-                        del investors_data[inv_id]
-                
-                if investor_data_to_move:
-                    # Generic message for unexpected errors
-                    investor_data_to_move['MESSAGE'] = f"unexpected error: {str(e)[:100]}"  # Truncate long errors
-                    
-                    with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
-                        json.dump(investors_data, f, indent=4)
-                    
-                    issues_data = {}
-                    if os.path.exists(ISSUES_INVESTORS):
-                        try:
-                            with open(ISSUES_INVESTORS, 'r', encoding='utf-8') as f:
-                                issues_data = json.load(f)
-                        except: issues_data = {}
-                    
-                    issues_data[inv_id] = investor_data_to_move
-                    with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
-                        json.dump(issues_data, f, indent=4)
-                    
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
-                else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
-        except Exception as move_error:
-            print(f"  ❌ Failed to move investor to issues_investors.json: {move_error}")
-        
-        mt5.shutdown()
-    
-    return account_stats
-
-def process_single_investor_realacc(inv_id):
-    """
-    WORKER FUNCTION: Handles the entire pipeline for ONE investor ID.
-    """
-    account_stats = {"inv_id": inv_id, "success": False}
-    
-    try:
-        with open(INVESTOR_USERS, 'r') as f:
-            investor_users = json.load(f)
-        broker_cfg = investor_users.get(inv_id)
-    except Exception as e:
-        print(f" [{inv_id}] ❌ JSON Read Error: {e}")
-        return account_stats
-
-    if not broker_cfg:
-        return account_stats
-
-    # Small jitter to prevent OS file-lock collisions when launching multiple .exe files
-    time.sleep(random.uniform(0.1, 1.5)) 
-    
-    login_id = int(broker_cfg['LOGIN_ID'])
-    mt5_path = broker_cfg["TERMINAL_PATH"]
-    
-    try:
-        # Increase timeout slightly but keep it non-blocking for other processes
-        # If this fails, it only kills this specific worker.
-        if not mt5.initialize(path=mt5_path, timeout=60000): # 60 sec limit
-            print(f" [{inv_id}] ❌ MT5 Init Timeout/Failed")
-            
-            # --- MOVE TO ISSUES_INVESTORS ON INIT FAILURE ---
-            print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to MT5 initialization failure")
-            
-            if os.path.exists(INVESTOR_USERS):
-                with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
-                    investors_data = json.load(f)
-                
-                investor_data_to_move = None
-                if isinstance(investors_data, list):
-                    for i, inv in enumerate(investors_data):
-                        if inv_id in inv:
-                            investor_data_to_move = inv[inv_id]
-                            investors_data.pop(i)
-                            break
-                else:
-                    if inv_id in investors_data:
-                        investor_data_to_move = investors_data[inv_id]
-                        del investors_data[inv_id]
-                
-                if investor_data_to_move:
-                    # Specific message for MT5 initialization failure
-                    investor_data_to_move['MESSAGE'] = "invalid broker login please check your login details"
-                    
-                    with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
-                        json.dump(investors_data, f, indent=4)
-                    
-                    issues_data = {}
-                    if os.path.exists(ISSUES_INVESTORS):
-                        try:
-                            with open(ISSUES_INVESTORS, 'r', encoding='utf-8') as f:
-                                issues_data = json.load(f)
-                        except: issues_data = {}
-                    
-                    issues_data[inv_id] = investor_data_to_move
-                    with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
-                        json.dump(issues_data, f, indent=4)
-                    
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
-                else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
-            
-            mt5.shutdown()
-            return account_stats
-
-        if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
-            print(f" [{inv_id}] ❌ Login failed")
-            
-            # --- MOVE TO ISSUES_INVESTORS ON LOGIN FAILURE ---
-            print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to login failure")
-            
-            if os.path.exists(INVESTOR_USERS):
-                with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
-                    investors_data = json.load(f)
-                
-                investor_data_to_move = None
-                if isinstance(investors_data, list):
-                    for i, inv in enumerate(investors_data):
-                        if inv_id in inv:
-                            investor_data_to_move = inv[inv_id]
-                            investors_data.pop(i)
-                            break
-                else:
-                    if inv_id in investors_data:
-                        investor_data_to_move = investors_data[inv_id]
-                        del investors_data[inv_id]
-                
-                if investor_data_to_move:
-                    # Specific message for login failure
-                    investor_data_to_move['MESSAGE'] = "invalid broker login please check your login details"
-                    
-                    with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
-                        json.dump(investors_data, f, indent=4)
-                    
-                    issues_data = {}
-                    if os.path.exists(ISSUES_INVESTORS):
-                        try:
-                            with open(ISSUES_INVESTORS, 'r', encoding='utf-8') as f:
-                                issues_data = json.load(f)
-                        except: issues_data = {}
-                    
-                    issues_data[inv_id] = investor_data_to_move
-                    with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
-                        json.dump(issues_data, f, indent=4)
-                    
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
-                else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
-            
-            mt5.shutdown()
-            return account_stats
-
-        # --- EXECUTION PIPELINE ---
-        # If any of these functions have internal delays, they won't affect other investors
         move_verified_investors()
         update_verified_investors_file()
         get_requirements(inv_id=inv_id)
         
         fetch_ohlc_data_for_investor(inv_id=inv_id)
         directional_bias(inv_id=inv_id)
-        #accountmanagement_manager(inv_id=inv_id)
         deduplicate_orders(inv_id=inv_id)
         filter_unauthorized_symbols(inv_id=inv_id)
         filter_unauthorized_timeframes(inv_id=inv_id)
@@ -11476,103 +11235,18 @@ def process_single_investor_realacc(inv_id):
         padding_tight_usd_risk(inv_id=inv_id)
         live_usd_risk_and_scaling(inv_id=inv_id)
         apply_default_prices(inv_id=inv_id)
-        place_usd_orders(inv_id=inv_id)
-        orders_risk_correction(inv_id=inv_id)
-        check_pending_orders_risk(inv_id=inv_id)
-        history_closed_orders_removal_in_pendingorders(inv_id=inv_id)
-        apply_dynamic_breakeven(inv_id=inv_id)
-
-        update_verified_investors_file()
-        check_and_record_authorized_actions(inv_id=inv_id)
-        update_investor_info(inv_id=inv_id)
-
+        martingale(inv_id=inv_id)
+        
         mt5.shutdown()
         account_stats["success"] = True
-        print(f" [{inv_id}] ✅ Processed Successfully")
         
     except Exception as e:
-        print(f" [{inv_id}] ❌ Pipeline Error: {e}")
-        
-        # --- MOVE TO ISSUES_INVESTORS ON ANY UNEXPECTED ERROR ---
-        print(f"  ❌ Moving investor {inv_id} to issues_investors.json due to unexpected error: {e}")
-        
         try:
-            if os.path.exists(INVESTOR_USERS):
-                with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
-                    investors_data = json.load(f)
-                
-                investor_data_to_move = None
-                if isinstance(investors_data, list):
-                    for i, inv in enumerate(investors_data):
-                        if inv_id in inv:
-                            investor_data_to_move = inv[inv_id]
-                            investors_data.pop(i)
-                            break
-                else:
-                    if inv_id in investors_data:
-                        investor_data_to_move = investors_data[inv_id]
-                        del investors_data[inv_id]
-                
-                if investor_data_to_move:
-                    # Generic message for unexpected errors
-                    investor_data_to_move['MESSAGE'] = f"unexpected error: {str(e)[:100]}"  # Truncate long errors
-                    
-                    with open(INVESTOR_USERS, 'w', encoding='utf-8') as f:
-                        json.dump(investors_data, f, indent=4)
-                    
-                    issues_data = {}
-                    if os.path.exists(ISSUES_INVESTORS):
-                        try:
-                            with open(ISSUES_INVESTORS, 'r', encoding='utf-8') as f:
-                                issues_data = json.load(f)
-                        except: issues_data = {}
-                    
-                    issues_data[inv_id] = investor_data_to_move
-                    with open(ISSUES_INVESTORS, 'w', encoding='utf-8') as f:
-                        json.dump(issues_data, f, indent=4)
-                    
-                    print(f"  ✅ Successfully moved investor {inv_id} to issues_investors.json")
-                else:
-                    print(f"  ⚠️  Investor {inv_id} not found in investors.json")
-        except Exception as move_error:
-            print(f"  ❌ Failed to move investor to issues_investors.json: {move_error}")
-        
-        mt5.shutdown()
+            mt5.shutdown()
+        except:
+            pass
     
     return account_stats
-
-def place_orders_parallel_real_acc():
-    """
-    ORCHESTRATOR: Spawns processes. If one hangs, others continue.
-    """
-    print(f"\n{'='*10} 🚀 MULTIPROCESSING ENGINE START {'='*10}")
-    
-    try:
-        with open(INVESTOR_USERS, 'r') as f:
-            investor_users = json.load(f)
-    except Exception as e:
-        print(f" ❌ Could not load JSON: {e}")
-        return False
-
-    investor_ids = list(investor_users.keys())
-    if not investor_ids:
-        return False
-
-    # Define number of workers (max cores or number of accounts)
-    num_processes = len(investor_ids)
-    
-    # Using a context manager ensures the pool is cleaned up properly
-    with mp.Pool(processes=num_processes) as pool:
-        # map() is blocking until all are done, but the executions are parallel.
-        # This means the script waits for the SLOWEST investor to finish 
-        # before printing the final summary.
-        results = pool.map(process_single_investor, investor_ids)
-
-    successful = sum(1 for r in results if r.get("success"))
-    print(f"\n{'='*10} ALL TASKS FINISHED {'='*10}")
-    print(f" Success: {successful} | Failed: {len(investor_ids)-successful}")
-    
-    return successful > 0
 
 def process_single_investor(inv_folder):
     """
@@ -11696,13 +11370,13 @@ def place_orders_parallel():
     with mp.Pool(processes=len(investor_folders)) as pool:
         results = pool.map(process_single_investor, investor_folders)
 
-    time.sleep(0.2)
-    place_orders_parallel()
+    #time.sleep(0.2)
+    #place_orders_parallel()
     
     return 
 
 
 if __name__ == "__main__":
-   place_orders_parallel()
+    place_orders_parallel()
 
 

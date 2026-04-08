@@ -6,5 +6,13 @@
         "INVESTED_WITH": "bybit1_prices",
         "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Bybit 1\\terminal64.exe",
         "MESSAGE": "unexpected error: not enough values to unpack (expected 4, got 3)"
+    },
+    "4": {
+        "LOGIN_ID": "14029881",
+        "PASSWORD": "xrcOE94##",
+        "SERVER": "FundedNext-Server2",
+        "INVESTED_WITH": "fundednext_prices",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 fundednext 4\\terminal64.exe",
+        "MESSAGE": "invalid broker login please check your login details"
     }
 }

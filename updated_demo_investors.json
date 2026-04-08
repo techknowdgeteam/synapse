@@ -1,0 +1,124 @@
+{
+    "deriv_e": {
+        "id": "deriv_e",
+        "server": "deriv-demo",
+        "login": "40940152",
+        "password": "@Techknowdge12#",
+        "application_status": "approved_with_bypass",
+        "broker_balance": 4684.12,
+        "profitandloss": -522.09,
+        "contract_days_left": "27",
+        "execution_start_date": "April 04, 2026",
+        "last_audit_timestamp": "2026-04-07T18:39:29.096989",
+        "current_balance": 4162.03,
+        "trades": {
+            "summary": {
+                "total_trades": 9,
+                "won": 1,
+                "lost": 1,
+                "symbols_that_lost": {
+                    "GBPUSD": -0.5
+                },
+                "symbols_that_won": {
+                    "GBPUSD": 0.51
+                }
+            },
+            "authorized_closed_trades": [
+                {
+                    "ticket": 4570474727,
+                    "symbol": "GBPUSD",
+                    "type": "SELL",
+                    "volume": 10.0,
+                    "profit": 0.0,
+                    "time": "2026-04-07 16:56:32",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 4570479440,
+                    "symbol": "GBPUSD",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-04-07 17:02:31",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 4570479451,
+                    "symbol": "GBPUSD",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-04-07 17:03:03",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 4570482810,
+                    "symbol": "GBPUSD",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.51,
+                    "time": "2026-04-07 17:03:07",
+                    "match_method": "volume_symbol"
+                },
+                {
+                    "ticket": 4570484969,
+                    "symbol": "GBPUSD",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.5,
+                    "time": "2026-04-07 17:05:01",
+                    "match_method": "volume_symbol"
+                },
+                {
+                    "ticket": 4570489504,
+                    "symbol": "GBPUSD",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-04-07 17:14:26",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 4570489508,
+                    "symbol": "GBPUSD",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-04-07 17:23:16",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 4570489513,
+                    "symbol": "GBPUSD",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-04-07 17:23:18",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 4570515951,
+                    "symbol": "GBPUSD",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-04-07 17:41:10",
+                    "match_method": "ticket"
+                }
+            ]
+        },
+        "authorized_tickets_count": 609,
+        "magic_number": 0,
+        "unauthorized_actions": {
+            "detected": true,
+            "bypass_active": true,
+            "autotrading_active": true,
+            "type": [],
+            "unauthorized_trades": [],
+            "unauthorized_withdrawals": [],
+            "unauthorized_orders": [],
+            "unauthorized_positions": []
+        },
+        "bypass_note": "Unauthorized actions detected but bypass is active"
+    }
+}

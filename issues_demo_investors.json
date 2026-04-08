@@ -1,0 +1,10 @@
+{
+    "deriv_e": {
+        "LOGIN_ID": "40940152",
+        "PASSWORD": "@Techknowdge12#",
+        "SERVER": "deriv-demo",
+        "INVESTED_WITH": "deriv_prices",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\synapse\\mt5\\MetaTrader 5 Deriv e\\terminal64.exe",
+        "MESSAGE": "invalid broker login please check your login details"
+    }
+}
