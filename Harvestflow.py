@@ -12636,7 +12636,7 @@ def place_instant_stop_orders(inv_id=None):
     
     return stats
 
-def process_single_investor(inv_folder):
+def process_single_invest(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -12713,7 +12713,7 @@ def process_single_investor(inv_folder):
     
     return account_stats
 
-def process_single_invest(inv_folder):
+def process_single_investor(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -12868,7 +12868,7 @@ def place_orders_parallel():
                 config = json.load(f)
             
             settings = config.get("settings", {})
-            synapse_enabled = settings.get("synapse", False)
+            synapse_enabled = settings.get("harvester", False)
             
             if synapse_enabled:
                 eligible_investors.append(inv_folder)
