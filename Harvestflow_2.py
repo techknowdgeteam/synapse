@@ -9377,7 +9377,7 @@ def place_usd_orders(inv_id=None):
     ENHANCED FEATURES:
     1. Detailed tradeshistory.json with complete order information
     2. Per-order cache to prevent duplicate placement in same run
-    3. Proximity risk check against existing positions (OPTIONAL - controlled by settings)
+    3. Proximity risk check against existing positions
     4. Order regulation - always cancels unauthorized orders
     5. Dynamic order types: buy_stop, sell_stop, buy_limit, sell_limit, instant_buy, instant_sell
     6. No conversion logic - places exactly what limit_orders.json specifies
@@ -9416,8 +9416,8 @@ def place_usd_orders(inv_id=None):
         ".ecn",  # Dot ECN
         "real",  # Real account
         ".real", # Dot real
-        "phase",  # phase account
-        ".phase"  # Dot phase
+        "demo",  # Demo account
+        ".demo"  # Dot demo
     ]
     
     # --- SUB-FUNCTION 1: REMOVE CANDLE TIME RECORD ON FAILURE ---
@@ -9534,47 +9534,12 @@ def place_usd_orders(inv_id=None):
         # Default volume
         return 0.01
 
-    # --- SUB-FUNCTION 5: LOAD SETTINGS FROM ACCOUNTMANAGEMENT ---
-    def load_skip_orders_setting(investor_root):
-        """
-        Load the skip_orders_close_to_position setting from accountmanagement.json.
-        Returns True if skipping is enabled, False otherwise.
-        """
-        acc_mgmt_path = investor_root / "accountmanagement.json"
-        
-        if not acc_mgmt_path.exists():
-            print(f"        ⚠️ No accountmanagement.json found - defaulting to SKIP ENABLED")
-            return True  # Default to skipping for safety
-        
-        try:
-            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            settings = config.get("settings", {})
-            skip_orders = settings.get("skip_orders_close_to_position", True)
-            
-            if skip_orders:
-                print(f"        🔒 Skip orders close to position: ENABLED (orders too close will be blocked)")
-            else:
-                print(f"        🔓 Skip orders close to position: DISABLED (all orders will be placed regardless of proximity)")
-            
-            return skip_orders
-            
-        except Exception as e:
-            print(f"        ⚠️ Error loading skip_orders setting: {e} - defaulting to ENABLED")
-            return True  # Default to skipping for safety
-
-    # --- SUB-FUNCTION 6: CHECK PROXIMITY RISK (UPDATED WITH SETTING) ---
-    def check_proximity_risk(order, existing_positions, skip_enabled):
+    # --- SUB-FUNCTION 5: CHECK PROXIMITY RISK ---
+    def check_proximity_risk(order, existing_positions):
         """
         Check if order is too close to existing positions using risk-based calculation.
-        If skip_enabled is False, always returns (False, None, 0, 0) - meaning no risk blocking.
         Returns (is_risk, closest_position, risk_amount, threshold)
         """
-        # If skipping is disabled, ALWAYS return safe (no risk blocking)
-        if not skip_enabled:
-            return False, None, 0, 0
-        
         symbol = order.get('symbol')
         order_type = order.get('order_type', '').lower()
         entry_price = float(order.get('entry', 0))
@@ -9685,7 +9650,7 @@ def place_usd_orders(inv_id=None):
         
         return False, None, 0, 0
 
-    # --- SUB-FUNCTION 7: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
+    # --- SUB-FUNCTION 6: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
     def regulate_orders(investor_root, authorized_keys):
         """
         Cancel ALL pending orders that are NOT in the authorized list.
@@ -9747,7 +9712,7 @@ def place_usd_orders(inv_id=None):
             print(f"    ⚠️  Error during regulation: {e}")
             return 0
 
-    # --- SUB-FUNCTION 8: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
+    # --- SUB-FUNCTION 7: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
     def sync_and_save_detailed_history(investor_root, new_trade=None, original_signal_fields=None):
         """
         Synchronizes tradeshistory.json with MT5 terminal.
@@ -10008,12 +9973,12 @@ def place_usd_orders(inv_id=None):
             }
             
         except Exception as e:
-            print(f"      ❌ Error in sync_and_save_history: {e}")
+            print(f"       Error in sync_and_save_history: {e}")
             import traceback
             traceback.print_exc()
             return False, None
     
-    # --- SUB-FUNCTION 9: CHECK IF SYMBOL IS TRADEABLE ---
+    # --- SUB-FUNCTION 8: CHECK IF SYMBOL IS TRADEABLE ---
     def is_symbol_tradeable(symbol):
         """
         Check if a symbol exists AND trading is enabled.
@@ -10044,7 +10009,7 @@ def place_usd_orders(inv_id=None):
         
         return True
 
-    # --- SUB-FUNCTION 10: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
+    # --- SUB-FUNCTION 9: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
     def find_tradeable_symbol_with_retry(base_symbol, resolution_cache):
         """
         Try ALL suffixes one after another until a tradeable symbol is found.
@@ -10082,11 +10047,11 @@ def place_usd_orders(inv_id=None):
                 resolution_cache[symbol_cache_key] = False
         
         # No tradeable symbol found
-        print(f"        ❌ FAILED: No tradeable symbol found for '{base_symbol}' after trying {len(SYMBOL_SUFFIXES)} suffixes")
+        print(f"         FAILED: No tradeable symbol found for '{base_symbol}' after trying {len(SYMBOL_SUFFIXES)} suffixes")
         resolution_cache[cache_key] = None
         return None, None
 
-    # --- SUB-FUNCTION 11: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
+    # --- SUB-FUNCTION 10: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
     def collect_orders_from_signals(investor_root, resolution_cache):
         """
         Collect all orders from limit_orders.json files in ALL strategy subfolders.
@@ -10155,7 +10120,7 @@ def place_usd_orders(inv_id=None):
                         print(f"            ✅ Using tradeable symbol: {tradeable_symbol} (original: {raw_symbol})")
                     
             except json.JSONDecodeError as e:
-                print(f"         ❌ Invalid JSON in {signals_path}: {e}")
+                print(f"          Invalid JSON in {signals_path}: {e}")
                 continue
             except Exception as e:
                 print(f"         ⚠️  Error reading {signals_path}: {e}")
@@ -10164,8 +10129,8 @@ def place_usd_orders(inv_id=None):
         print(f"    📡 Total signals collected: {len(entries_with_paths)}")
         return entries_with_paths
 
-    # --- SUB-FUNCTION 12: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
-    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal, skip_enabled):
+    # --- SUB-FUNCTION 11: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
+    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal):
         """
         Execute a single order based on its order_type.
         PRESERVES ALL FIELDS from original signal for tradeshistory.
@@ -10185,7 +10150,7 @@ def place_usd_orders(inv_id=None):
         # Get symbol info - use exact symbol name
         if not mt5.symbol_select(symbol, True):
             error_msg = f"Failed to select symbol {symbol}"
-            print(f"        ❌ {error_msg}")
+            print(f"         {error_msg}")
             
             # Remove candle time record if we have the necessary info
             if timeframe and current_candle_time:
@@ -10197,7 +10162,7 @@ def place_usd_orders(inv_id=None):
         symbol_info = mt5.symbol_info(symbol)
         if not symbol_info:
             error_msg = f"Cannot get symbol info for {symbol}"
-            print(f"        ❌ {error_msg}")
+            print(f"         {error_msg}")
             
             # Remove candle time record if we have the necessary info
             if timeframe and current_candle_time:
@@ -10216,7 +10181,7 @@ def place_usd_orders(inv_id=None):
         mt5_order_type = get_mt5_order_type(order_type)
         if mt5_order_type is None:
             error_msg = f"Invalid order type: {order_type}"
-            print(f"        ❌ {error_msg}")
+            print(f"         {error_msg}")
             
             # Remove candle time record if we have the necessary info
             if timeframe and current_candle_time:
@@ -10234,14 +10199,8 @@ def place_usd_orders(inv_id=None):
             print(f"        ⏭️  SKIP - {error_msg}")
             return False, None, error_msg, cache_key
         
-        # Check proximity risk (ONLY if skip_enabled is True)
-        if skip_enabled:
-            is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions, skip_enabled)
-        else:
-            is_risk = False
-            risk_position = None
-            risk_amount = 0
-            risk_threshold = 0
+        # Check proximity risk
+        is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions)
         
         if is_risk:
             error_msg = f"Too close to position #{risk_position.ticket if risk_position else 'unknown'}"
@@ -10260,7 +10219,7 @@ def place_usd_orders(inv_id=None):
             tick = mt5.symbol_info_tick(symbol)
             if not tick:
                 error_msg = f"Cannot get tick for {symbol}"
-                print(f"        ❌ {error_msg}")
+                print(f"         {error_msg}")
                 
                 # Remove candle time record
                 if timeframe and current_candle_time:
@@ -10314,7 +10273,7 @@ def place_usd_orders(inv_id=None):
         
         if result is None:
             error_msg = f"Order send failed: {mt5.last_error()}"
-            print(f"        ❌ {error_msg}")
+            print(f"         {error_msg}")
             
             # Remove candle time record
             if timeframe and current_candle_time:
@@ -10325,7 +10284,7 @@ def place_usd_orders(inv_id=None):
         
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             error_msg = f"Order failed: {result.comment} (code: {result.retcode})"
-            print(f"        ❌ {error_msg}")
+            print(f"         {error_msg}")
             
             # Remove candle time record on failure
             if timeframe and current_candle_time:
@@ -10401,7 +10360,7 @@ def place_usd_orders(inv_id=None):
         investor_root = Path(INV_PATH) / user_brokerid
         
         if not investor_root.exists():
-            print(f"  ❌ Investor root not found: {investor_root}")
+            print(f"   Investor root not found: {investor_root}")
             continue
         
         # STEP 1: Check authorization status
@@ -10412,10 +10371,7 @@ def place_usd_orders(inv_id=None):
             global_stats['investors_blocked'] += 1
             continue
         
-        # STEP 2: Load skip_orders_close_to_position setting from accountmanagement.json
-        skip_enabled = load_skip_orders_setting(investor_root)
-        
-        # STEP 3: Sync existing tradeshistory.json FIRST (to get current status)
+        # STEP 2: Sync existing tradeshistory.json FIRST (to get current status)
         print(f"\n  🔄 Syncing tradeshistory.json with MT5 (checking all orders/positions)...")
         sync_success, sync_stats = sync_and_save_detailed_history(investor_root)
         
@@ -10425,7 +10381,7 @@ def place_usd_orders(inv_id=None):
             print(f"  📊 Current status: {sync_stats.get('running_positions', 0)} running positions, "
                   f"{sync_stats.get('pending_orders', 0)} pending orders")
         
-        # STEP 4: Collect signals from ALL strategy folders
+        # STEP 3: Collect signals from ALL strategy folders
         all_signals = collect_orders_from_signals(investor_root, resolution_cache)
         
         if not all_signals:
@@ -10441,19 +10397,18 @@ def place_usd_orders(inv_id=None):
         if suffix_retries > 0:
             print(f"  🔄 Successfully applied suffix retry to {suffix_retries} signals")
         
-        # STEP 5: Get existing positions for risk check
+        # STEP 4: Get existing positions for risk check
         existing_positions = mt5.positions_get() or []
         print(f"  📊 Found {len(existing_positions)} existing open positions for risk check")
         
-        # STEP 6: Per-order cache for this run
+        # STEP 5: Per-order cache for this run
         per_order_cache = set()
         
-        # STEP 7: Build authorized keys for regulation
+        # STEP 6: Build authorized keys for regulation
         authorized_keys = set()
         
-        # STEP 8: Process each signal
+        # STEP 7: Process each signal
         print(f"\n  📝 Processing {len(all_signals)} signals...")
-        print(f"  🔒 Proximity risk protection: {'ENABLED' if skip_enabled else 'DISABLED'}")
         
         orders_placed = 0
         orders_skipped_duplicate = 0
@@ -10478,9 +10433,9 @@ def place_usd_orders(inv_id=None):
             if original_fields > 0:
                 print(f"        📋 Original signal has {original_fields} fields (will be preserved)")
             
-            # Execute order (pass skip_enabled)
+            # Execute order
             success, result, error, cache_key = execute_order(
-                order_data, investor_root, per_order_cache, existing_positions, original_signal, skip_enabled
+                order_data, investor_root, per_order_cache, existing_positions, original_signal
             )
             
             if cache_key:
@@ -10496,15 +10451,15 @@ def place_usd_orders(inv_id=None):
                 else:
                     orders_failed += 1
                     records_removed += 1  # Failure removes record
-                    print(f"        ❌ FAILED: {error}")
+                    print(f"         FAILED: {error}")
         
         global_stats['total_candle_records_removed'] += records_removed
         
-        # STEP 9: Regulate orders (cancel unauthorized)
+        # STEP 8: Regulate orders (cancel unauthorized)
         print(f"\n  🧹 Running order regulation...")
         cancelled_count = regulate_orders(investor_root, authorized_keys)
         
-        # STEP 10: Final sync to capture any changes from regulation
+        # STEP 9: Final sync to capture any changes from regulation
         print(f"\n  🔄 Final sync to capture all status changes...")
         final_sync, final_stats = sync_and_save_detailed_history(investor_root)
         
@@ -10521,7 +10476,6 @@ def place_usd_orders(inv_id=None):
         
         # Print investor summary
         print(f"\n  📊 INVESTOR SUMMARY:")
-        print(f"     • Skip proximity risk: {'ENABLED' if skip_enabled else 'DISABLED'}")
         print(f"     • Signals processed: {len(all_signals)}")
         print(f"     • Orders placed: {orders_placed}")
         print(f"     • Skipped (duplicate): {orders_skipped_duplicate}")
@@ -10559,7 +10513,103 @@ def place_usd_orders(inv_id=None):
     
     return any_orders_placed
 
-def check_pending_orders_risk(inv_id=None):
+def history_closed_orders_removal_in_pendingorders(inv_id=None):
+    """
+    Scans history for the last 48 hours. If a position was closed, 
+    any pending limit orders with the same first 4 digits in the price 
+    are cancelled to prevent re-entry.
+    
+    Args:
+        inv_id (str, optional): Specific investor ID to process. If None, processes all investors.
+        MT5 should already be initialized and logged in for this investor.
+    
+    Returns:
+        bool: True if any orders were removed, False otherwise
+    """
+    from datetime import datetime, timedelta
+    print(f"\n{'='*10} 📜 HISTORY AUDIT: PREVENTING RE-ENTRY {'='*10}")
+
+    # Determine which investors to process
+    if inv_id:
+        investor_ids = [inv_id]
+    else:
+        investor_ids = list(usersdictionary.keys())
+    
+    if not investor_ids:
+        print(" └─ 🔘 No investors found.")
+        return False
+
+    any_orders_removed = False
+
+    for user_brokerid in investor_ids:
+        print(f" [{user_brokerid}] 🔍 Checking 48h history for duplicates...")
+        
+        broker_cfg = usersdictionary.get(user_brokerid)
+        if not broker_cfg:
+            print(f"  └─  No broker config found for {user_brokerid}")
+            continue
+
+        # 1. Define the 48-hour window
+        from_date = datetime.now() - timedelta(hours=48)
+        to_date = datetime.now()
+
+        # 2. Get Closed Positions (Deals)
+        history_deals = mt5.history_deals_get(from_date, to_date)
+        if history_deals is None:
+            print(f"  └─ ⚠️ Could not access history for {user_brokerid}")
+            continue
+
+        # 3. Create a set of "Used Price Prefixes"
+        # We store: (symbol, price_prefix)
+        used_entries = set()
+        for deal in history_deals:
+            # Only look at actual trades (buy/sell) that were closed
+            if deal.entry in [mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]:
+                # Extract first 3 significant digits of the price
+                # We remove the decimal to handle 0.856 and 1901 uniformly
+                clean_price = str(deal.price).replace('.', '')[:4]
+                used_entries.add((deal.symbol, clean_price))
+
+        if not used_entries:
+            print(f"  └─ ✅ No closed orders found in last 48h.")
+            continue
+
+        # 4. Check Current Pending Orders
+        pending_orders = mt5.orders_get()
+        removed_count = 0
+        orders_checked = 0
+
+        if pending_orders:
+            for order in pending_orders:
+                # Only target limit orders
+                if order.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT]:
+                    orders_checked += 1
+                    order_price_prefix = str(order.price_open).replace('.', '')[:4]
+                    
+                    # If this symbol + price prefix exists in history, kill the order
+                    if (order.symbol, order_price_prefix) in used_entries:
+                        print(f"  └─ 🚫 DUPLICATE FOUND: {order.symbol} at {order.price_open}")
+                        print(f"     Match found in history (Prefix: {order_price_prefix}). Cancelling...")
+                        
+                        cancel_request = {
+                            "action": mt5.TRADE_ACTION_REMOVE,
+                            "order": order.ticket
+                        }
+                        res = mt5.order_send(cancel_request)
+                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                            removed_count += 1
+                            any_orders_removed = True
+                            print(f"     ✅ Order #{order.ticket} cancelled successfully")
+                        else:
+                            error_msg = res.comment if res else f"Error code: {res.retcode if res else 'Unknown'}"
+                            print(f"      Failed to cancel #{order.ticket}: {error_msg}")
+
+        print(f"  └─ 📊 Cleanup Result: {removed_count} duplicate limit orders removed out of {orders_checked} checked.")
+
+    print(f"\n{'='*10} 🏁 HISTORY AUDIT COMPLETE {'='*10}\n")
+    return any_orders_removed
+
+def check_pending_orders_risk_old(inv_id=None):
     """
     Function 3: Validates live pending orders against the account's current risk bucket.
      VERSION: Uses the EXACT account initialization logic from place_usd_orders_for_accounts()
@@ -10568,8 +10618,7 @@ def check_pending_orders_risk(inv_id=None):
     NOW CHECKS: ALL pending orders (LIMIT, STOP, STOP-LIMIT)
     
     RISK CONFIGURATION LOGIC:
-    - If enable_martingale = true: USE martingale_risk_management (balance-based risk from dedicated section)
-    - Else if enable_maximum_account_balance_management = true -> use account_balance_maximum_risk_management
+    - If enable_maximum_account_balance_management = true -> use account_balance_maximum_risk_management
     - Else if enable_default_account_balance_management = true -> use account_balance_default_risk_management
     - Else (both false) -> default to account_balance_default_risk_management
     
@@ -10591,8 +10640,6 @@ def check_pending_orders_risk(inv_id=None):
         "orders_kept_lower": 0,
         "orders_kept_in_range": 0,
         "risk_config_used": None,
-        "martingale_active": False,
-        "martingale_max_risk": 0.0,
         "processing_success": False
     }
     
@@ -10645,139 +10692,95 @@ def check_pending_orders_risk(inv_id=None):
             
             # Get settings flags
             settings = config.get("settings", {})
-            enable_martingale = settings.get("enable_martingale", False)
             enable_default = settings.get("enable_default_account_balance_management", False)
             enable_maximum = settings.get("enable_maximum_account_balance_management", False)
             
             print(f"  └─ ⚙️  Risk Configuration Settings:")
-            print(f"      • enable_martingale: {enable_martingale}")
             print(f"      • enable_default_account_balance_management: {enable_default}")
             print(f"      • enable_maximum_account_balance_management: {enable_maximum}")
             
             # Determine which risk config to use
             risk_map = None
             risk_config_used = None
-            primary_risk = None
             
-            # Get account info first to get current balance
-            # --- ACCOUNT CONNECTION CHECK ---
-            print(f"  └─ 🔌 Checking account connection...")
+            # LOGIC: If maximum is enabled, use maximum (even if default is also enabled)
+            if enable_maximum:
+                risk_map = config.get("account_balance_maximum_risk_management", {})
+                risk_config_used = "maximum"
+                print(f"      📋 USING: account_balance_maximum_risk_management (maximum enabled)")
             
-            login_id = int(broker_cfg['LOGIN_ID'])
-            mt5_path = broker_cfg["TERMINAL_PATH"]
+            # Else if default is enabled (and maximum is false), use default
+            elif enable_default:
+                risk_map = config.get("account_balance_default_risk_management", {})
+                risk_config_used = "default"
+                print(f"      📋 USING: account_balance_default_risk_management (default enabled)")
             
-            print(f"      • Terminal Path: {mt5_path}")
-            print(f"      • Login ID: {login_id}")
-
-            # Check if already logged into correct account
-            acc = mt5.account_info()
-            if acc is None or acc.login != login_id:
-                print(f"  └─  Not logged into the correct account. Expected: {login_id}, Found: {acc.login if acc else 'None'}")
-                continue
+            # Else (both false), default to default risk management
             else:
-                print(f"      ✅ Connected to account: {acc.login}")
-
-            acc_info = mt5.account_info()
-            if not acc_info:
-                print(f"  └─  Failed to get account info")
+                risk_map = config.get("account_balance_default_risk_management", {})
+                risk_config_used = "default (fallback)"
+                print(f"      📋 USING: account_balance_default_risk_management (fallback - both flags false)")
+            
+            if not risk_map:
+                print(f"  └─ ⚠️  Selected risk configuration is empty or missing")
                 continue
                 
-            balance = acc_info.balance
-            print(f"      • Current Balance: ${balance:.2f}")
-            
-            # NEW LOGIC: If martingale is enabled, USE martingale_risk_management section
-            if enable_martingale:
-                martingale_risk_map = config.get("martingale_risk_management", {})
-                
-                if martingale_risk_map:
-                    print(f"      📋 USING: martingale risk management (balance-based)")
-                    print(f"      🔍 Finding risk for balance ${balance:.2f}...")
-                    
-                    # Parse the risk map to find the appropriate risk for current balance
-                    for range_str, risk_value in martingale_risk_map.items():
-                        try:
-                            # Extract the balance range from the key (e.g., "1000-90000.99_risk" -> "1000-90000.99")
-                            raw_range = range_str.split("_")[0]
-                            low_str, high_str = raw_range.split("-")
-                            low = float(low_str)
-                            high = float(high_str)
-                            
-                            if low <= balance <= high:
-                                primary_risk = float(risk_value)
-                                risk_config_used = f"martingale_risk_management ({range_str})"
-                                stats["martingale_active"] = True
-                                stats["martingale_max_risk"] = primary_risk
-                                print(f"      • Found matching range: {range_str}")
-                                print(f"      • Risk limit: ${primary_risk:.2f}")
-                                break
-                        except Exception as e:
-                            print(f"      ⚠️  Error parsing range '{range_str}': {e}")
-                            continue
-                    
-                    if primary_risk is None:
-                        print(f"      ⚠️  No risk mapping found for balance ${balance:.2f} in martingale_risk_management")
-                        print(f"      Using default risk: $500")
-                        primary_risk = 500
-                        risk_config_used = "martingale_risk_management (default fallback)"
-                        stats["martingale_max_risk"] = primary_risk
-                else:
-                    print(f"      ⚠️  No martingale_risk_management section found in config")
-                    print(f"      Using default risk: $500")
-                    primary_risk = 500
-                    risk_config_used = "martingale_risk_management (missing section - fallback)"
-                    stats["martingale_max_risk"] = primary_risk
-                
-                stats["martingale_active"] = True
-                print(f"      ℹ️  martingale is enabled - using balance-based martingale risk management")
-            
-            # If martingale is NOT enabled, use account balance risk management
-            else:
-                stats["martingale_active"] = False
-                
-                # LOGIC: If maximum is enabled, use maximum (even if default is also enabled)
-                if enable_maximum:
-                    risk_map = config.get("account_balance_maximum_risk_management", {})
-                    risk_config_used = "maximum"
-                    print(f"      📋 USING: account_balance_maximum_risk_management (maximum enabled)")
-                
-                # Else if default is enabled (and maximum is false), use default
-                elif enable_default:
-                    risk_map = config.get("account_balance_default_risk_management", {})
-                    risk_config_used = "default"
-                    print(f"      📋 USING: account_balance_default_risk_management (default enabled)")
-                
-                # Else (both false), default to default risk management
-                else:
-                    risk_map = config.get("account_balance_default_risk_management", {})
-                    risk_config_used = "default (fallback)"
-                    print(f"      📋 USING: account_balance_default_risk_management (fallback - both flags false)")
-                
-                if not risk_map:
-                    print(f"  └─ ⚠️  Selected risk configuration is empty or missing")
-                    continue
-                
-                # Determine Primary Risk Value based on selected risk map
-                for range_str, r_val in risk_map.items():
-                    try:
-                        raw_range = range_str.split("_")[0]
-                        low, high = map(float, raw_range.split("-"))
-                        if low <= balance <= high:
-                            primary_risk = float(r_val)
-                            break
-                    except Exception as e:
-                        print(f"  └─ ⚠️  Error parsing range '{range_str}': {e}")
-                        continue
-
-                if primary_risk is None:
-                    print(f"  └─ ⚠️  No risk mapping for balance ${balance:,.2f} in selected config")
-                    continue
-
         except Exception as e:
             print(f"  └─  Failed to read config: {e}")
             continue
 
-        print(f"\n  └─ 💰 Target Risk: ${primary_risk:.2f}")
-        print(f"  └─ 📋 Risk Source: {risk_config_used}")
+        # --- ACCOUNT CONNECTION CHECK (NO INIT/SHUTDOWN) ---
+        print(f"  └─ 🔌 Checking account connection...")
+        
+        login_id = int(broker_cfg['LOGIN_ID'])
+        mt5_path = broker_cfg["TERMINAL_PATH"]
+        
+        print(f"      • Terminal Path: {mt5_path}")
+        print(f"      • Login ID: {login_id}")
+
+        # Check if already logged into correct account
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            print(f"  └─  Not logged into the correct account. Expected: {login_id}, Found: {acc.login if acc else 'None'}")
+            continue
+        else:
+            print(f"      ✅ Connected to account: {acc.login}")
+
+        acc_info = mt5.account_info()
+        if not acc_info:
+            print(f"  └─  Failed to get account info")
+            continue
+            
+        balance = acc_info.balance
+
+        # Get terminal info for additional details
+        term_info = mt5.terminal_info()
+        
+        print(f"\n  └─ 📊 Account Details:")
+        print(f"      • Balance: ${acc_info.balance:,.2f}")
+        print(f"      • Equity: ${acc_info.equity:,.2f}")
+        print(f"      • Free Margin: ${acc_info.margin_free:,.2f}")
+        print(f"      • Margin Level: {acc_info.margin_level:.2f}%" if acc_info.margin_level else "      • Margin Level: N/A")
+        print(f"      • AutoTrading: {'✅ ENABLED' if term_info.trade_allowed else ' DISABLED'}")
+
+        # Determine Primary Risk Value based on selected risk map
+        primary_risk = None
+        for range_str, r_val in risk_map.items():
+            try:
+                raw_range = range_str.split("_")[0]
+                low, high = map(float, raw_range.split("-"))
+                if low <= balance <= high:
+                    primary_risk = float(r_val)
+                    break
+            except Exception as e:
+                print(f"  └─ ⚠️  Error parsing range '{range_str}': {e}")
+                continue
+
+        if primary_risk is None:
+            print(f"  └─ ⚠️  No risk mapping for balance ${balance:,.2f} in selected config")
+            continue
+
+        print(f"\n  └─ 💰 Target Risk (from {risk_config_used} config): ${primary_risk:.2f}")
         
         # Store which config was used in stats
         stats["risk_config_used"] = risk_config_used
@@ -10866,11 +10869,7 @@ def check_pending_orders_risk(inv_id=None):
         # Investor final summary
         if investor_orders_checked > 0:
             print(f"\n  └─ 📊 Audit Results for {user_brokerid}:")
-            print(f"       • Risk source: {risk_config_used}")
-            if stats["martingale_active"]:
-                print(f"       • martingale Active: ✅ YES (risk limit: ${primary_risk:.2f})")
-            else:
-                print(f"       • martingale Active:  NO")
+            print(f"       • Risk config used: {risk_config_used}")
             print(f"       • Orders checked: {investor_orders_checked}")
             if investor_orders_kept_lower > 0:
                 print(f"       • Kept (lower risk): {investor_orders_kept_lower}")
@@ -10888,11 +10887,6 @@ def check_pending_orders_risk(inv_id=None):
     print(f"\n{'='*10} 📊 RISK AUDIT SUMMARY {'='*10}")
     print(f"   Investor ID: {stats['investor_id']}")
     print(f"   Risk config used: {stats['risk_config_used']}")
-    if stats['martingale_active']:
-        print(f"   martingale Active: ✅ YES (using martingale_risk_management)")
-        print(f"   martingale Max Risk: ${stats['martingale_max_risk']:.2f}")
-    else:
-        print(f"   martingale Active:  NO (using account balance management)")
     print(f"   Orders checked: {stats['orders_checked']}")
     print(f"   Orders removed: {stats['orders_removed']}")
     print(f"   Orders kept (lower risk): {stats['orders_kept_lower']}")
@@ -10905,13 +10899,21 @@ def check_pending_orders_risk(inv_id=None):
     print(f"\n{'='*10} 🏁 RISK AUDIT COMPLETE {'='*10}\n")
     return stats
 
-def orders_risk_correction(inv_id=None):
+def check_pending_orders_risk(inv_id=None):
     """
-    Function: Checks both live pending orders AND open positions (LIMIT, STOP, and MARKET)
-    and adjusts their take profit levels based on the selected risk-reward ratio from
-    accountmanagement.json. Only executes if risk_reward_correction setting is True.
+    Function 3: Validates live pending orders against the account's current risk bucket.
     
-     VERSION: Uses the EXACT account initialization logic from place_usd_orders_for_accounts()
+    NEW LOGIC:
+    - account_balance_default_risk_management = Target risk range (what we want)
+    - account_balance_maximum_risk_management = Maximum allowed threshold (hard cap)
+    
+    RULES:
+    1. If order risk <= default_risk → ALLOWED (within target)
+    2. If default_risk < order risk <= maximum_risk → ALLOWED (between target and max)
+    3. If order risk > maximum_risk → REMOVED (exceeds hard cap)
+    4. If default_risk missing → use maximum_risk as both target and max
+    5. If maximum_risk missing → use default_risk as both target and max
+    6. If both missing or empty → skip checking
     
     Args:
         inv_id: Optional specific investor ID to process. If None, processes all investors.
@@ -10919,20 +10921,39 @@ def orders_risk_correction(inv_id=None):
     Returns:
         dict: Statistics about the processing
     """
-    print(f"\n{'='*10} 📐 RISK-REWARD CORRECTION: ALL POSITIONS & PENDING ORDERS (MARKET + LIMIT + STOP)  {'='*10}")
+    print(f"\n{'='*10} 🛡️ LIVE RISK AUDIT: TARGET + MAXIMUM THRESHOLD {'='*10}")
     if inv_id:
         print(f" Processing single investor: {inv_id}")
 
-    # Track statistics
+    # --- DATA INITIALIZATION ---
     stats = {
         "investor_id": inv_id if inv_id else "all",
         "orders_checked": 0,
-        "orders_adjusted": 0,
-        "orders_skipped": 0,
-        "orders_error": 0,
-        "positions_checked": 0,
-        "positions_adjusted": 0,
+        "orders_removed": 0,
+        "orders_kept": 0,
+        "default_risk_used": None,
+        "maximum_risk_used": None,
         "processing_success": False
+    }
+    
+    try:
+        if not os.path.exists(NORMALIZE_SYMBOLS_PATH):
+            print(" [!] CRITICAL ERROR: Normalization map path missing.")
+            return stats
+        with open(NORMALIZE_SYMBOLS_PATH, 'r') as f:
+            norm_map = json.load(f)
+    except Exception as e:
+        print(f" [!] CRITICAL ERROR: Normalization map load failed: {e}")
+        return stats
+
+    # Define MT5 order types for better readability
+    ORDER_TYPES = {
+        mt5.ORDER_TYPE_BUY_LIMIT: "BUY LIMIT",
+        mt5.ORDER_TYPE_SELL_LIMIT: "SELL LIMIT",
+        mt5.ORDER_TYPE_BUY_STOP: "BUY STOP",
+        mt5.ORDER_TYPE_SELL_STOP: "SELL STOP",
+        mt5.ORDER_TYPE_BUY_STOP_LIMIT: "BUY STOP-LIMIT",
+        mt5.ORDER_TYPE_SELL_STOP_LIMIT: "SELL STOP-LIMIT"
     }
 
     # Determine which investors to process
@@ -10942,7 +10963,7 @@ def orders_risk_correction(inv_id=None):
 
     for user_brokerid in investors_to_process:
         processed += 1
-        print(f"\n[{processed}/{total_investors}] {user_brokerid} 🔍 Checking risk-reward configurations...")
+        print(f"\n[{processed}/{total_investors}] {user_brokerid} 🔍 Auditing live risk limits...")
         
         # Get broker config
         broker_cfg = usersdictionary.get(user_brokerid)
@@ -10957,7 +10978,278 @@ def orders_risk_correction(inv_id=None):
             print(f"  └─ ⚠️  Account config missing. Skipping.")
             continue
 
-        # --- LOAD CONFIG AND CHECK SETTINGS ---
+        # --- LOAD CONFIG AND GET RISK VALUES ---
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            # Get both risk configurations
+            default_risk_map = config.get("account_balance_default_risk_management", {})
+            maximum_risk_map = config.get("account_balance_maximum_risk_management", {})
+            
+            print(f"  └─ ⚙️  Risk Configuration Loading:")
+            print(f"      • account_balance_default_risk_management: {'✅ Found' if default_risk_map else '❌ Missing'}")
+            print(f"      • account_balance_maximum_risk_management: {'✅ Found' if maximum_risk_map else '❌ Missing'}")
+            
+        except Exception as e:
+            print(f"  └─  Failed to read config: {e}")
+            continue
+
+        # --- ACCOUNT CONNECTION CHECK ---
+        print(f"  └─ 🔌 Checking account connection...")
+        
+        login_id = int(broker_cfg['LOGIN_ID'])
+        mt5_path = broker_cfg["TERMINAL_PATH"]
+        
+        print(f"      • Terminal Path: {mt5_path}")
+        print(f"      • Login ID: {login_id}")
+
+        # Check if already logged into correct account
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            print(f"  └─  Not logged into the correct account. Expected: {login_id}, Found: {acc.login if acc else 'None'}")
+            continue
+        else:
+            print(f"      ✅ Connected to account: {acc.login}")
+
+        acc_info = mt5.account_info()
+        if not acc_info:
+            print(f"  └─  Failed to get account info")
+            continue
+            
+        balance = acc_info.balance
+
+        # Get terminal info for additional details
+        term_info = mt5.terminal_info()
+        
+        print(f"\n  └─ 📊 Account Details:")
+        print(f"      • Balance: ${acc_info.balance:,.2f}")
+        print(f"      • Equity: ${acc_info.equity:,.2f}")
+        print(f"      • Free Margin: ${acc_info.margin_free:,.2f}")
+        print(f"      • Margin Level: {acc_info.margin_level:.2f}%" if acc_info.margin_level else "      • Margin Level: N/A")
+        print(f"      • AutoTrading: {'✅ ENABLED' if term_info.trade_allowed else ' DISABLED'}")
+
+        # --- DETERMINE DEFAULT RISK VALUE (Target) ---
+        default_risk = None
+        if default_risk_map:
+            for range_str, r_val in default_risk_map.items():
+                try:
+                    raw_range = range_str.split("_")[0]
+                    low, high = map(float, raw_range.split("-"))
+                    if low <= balance <= high:
+                        default_risk = float(r_val)
+                        break
+                except Exception as e:
+                    print(f"  └─ ⚠️  Error parsing default range '{range_str}': {e}")
+                    continue
+
+        # --- DETERMINE MAXIMUM RISK VALUE (Hard Cap) ---
+        maximum_risk = None
+        if maximum_risk_map:
+            for range_str, r_val in maximum_risk_map.items():
+                try:
+                    raw_range = range_str.split("_")[0]
+                    low, high = map(float, raw_range.split("-"))
+                    if low <= balance <= high:
+                        maximum_risk = float(r_val)
+                        break
+                except Exception as e:
+                    print(f"  └─ ⚠️  Error parsing maximum range '{range_str}': {e}")
+                    continue
+
+        # --- APPLY FALLBACK LOGIC ---
+        if default_risk is None and maximum_risk is None:
+            print(f"  └─ ⚠️  No risk configuration found for balance ${balance:,.2f}. Skipping check.")
+            continue
+        elif default_risk is None:
+            # No default found, use maximum as both target and cap
+            default_risk = maximum_risk
+            print(f"  └─ ⚠️  Default risk missing. Using maximum (${maximum_risk:.2f}) as both target and cap.")
+        elif maximum_risk is None:
+            # No maximum found, use default as both target and cap
+            maximum_risk = default_risk
+            print(f"  └─ ⚠️  Maximum risk missing. Using default (${default_risk:.2f}) as both target and cap.")
+        
+        # Ensure maximum is at least default (if not, use default as maximum)
+        if maximum_risk < default_risk:
+            print(f"  └─ ⚠️  Maximum risk (${maximum_risk:.2f}) is less than default (${default_risk:.2f}). Adjusting maximum to match default.")
+            maximum_risk = default_risk
+
+        print(f"\n  └─ 💰 Risk Configuration Applied:")
+        print(f"      • Target Risk (default): ${default_risk:.2f}")
+        print(f"      • Maximum Allowed (hard cap): ${maximum_risk:.2f}")
+        
+        # Store which configs were used in stats
+        stats["default_risk_used"] = default_risk
+        stats["maximum_risk_used"] = maximum_risk
+
+        # --- CHECK ALL LIVE PENDING ORDERS ---
+        pending_orders = mt5.orders_get()
+        investor_orders_checked = 0
+        investor_orders_removed = 0
+        investor_orders_kept = 0
+
+        if pending_orders:
+            print(f"  └─ 🔍 Scanning {len(pending_orders)} pending orders (ALL types)...")
+            
+            for order in pending_orders:
+                # Skip if not a pending order type
+                if order.type not in ORDER_TYPES.keys():
+                    continue
+
+                investor_orders_checked += 1
+                stats["orders_checked"] += 1
+                
+                order_type_name = ORDER_TYPES.get(order.type, f"Unknown Type {order.type}")
+                
+                # Determine order direction for calculations
+                is_buy = order.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_BUY_STOP_LIMIT]
+                calc_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
+                
+                # Calculate risk (stop loss distance in money)
+                if order.sl == 0:
+                    print(f"    └─ ⚠️  Order #{order.ticket} | {order_type_name} | {order.symbol} - No SL set, skipping risk check")
+                    continue
+                
+                sl_profit = mt5.order_calc_profit(calc_type, order.symbol, order.volume_initial, 
+                                                  order.price_open, order.sl)
+                
+                if sl_profit is not None:
+                    order_risk_usd = round(abs(sl_profit), 2)
+                    
+                    print(f"    └─ 📋 Order #{order.ticket} | {order_type_name} | {order.symbol}")
+                    print(f"       Order Risk: ${order_risk_usd:.2f}")
+                    print(f"       Target: ${default_risk:.2f} | Maximum: ${maximum_risk:.2f}")
+                    
+                    # --- NEW LOGIC: Check against both thresholds ---
+                    if order_risk_usd > maximum_risk:
+                        # Case 3: Exceeds maximum hard cap → REMOVE
+                        print(f"       🗑️ PURGING: Risk exceeds maximum threshold")
+                        print(f"       ${order_risk_usd:.2f} > ${maximum_risk:.2f} (exceeds by ${order_risk_usd - maximum_risk:.2f})")
+                        
+                        cancel_request = {
+                            "action": mt5.TRADE_ACTION_REMOVE,
+                            "order": order.ticket
+                        }
+                        result = mt5.order_send(cancel_request)
+                        
+                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                            investor_orders_removed += 1
+                            stats["orders_removed"] += 1
+                            print(f"       ✅ Order removed successfully")
+                        else:
+                            error_msg = result.comment if result else "No response"
+                            print(f"        Cancel failed: {error_msg}")
+                    
+                    elif order_risk_usd <= default_risk:
+                        # Case 1: Within target range → KEEP
+                        investor_orders_kept += 1
+                        stats["orders_kept"] += 1
+                        print(f"       ✅ KEEPING: Risk within target range")
+                        print(f"       ${order_risk_usd:.2f} ≤ ${default_risk:.2f}")
+                    
+                    elif default_risk < order_risk_usd <= maximum_risk:
+                        # Case 2: Between target and maximum → KEEP (allowed but noted)
+                        investor_orders_kept += 1
+                        stats["orders_kept"] += 1
+                        print(f"       ✅ KEEPING: Risk between target and maximum")
+                        print(f"       ${default_risk:.2f} < ${order_risk_usd:.2f} ≤ ${maximum_risk:.2f}")
+                    
+                else:
+                    print(f"    └─ ⚠️  Order #{order.ticket} - Could not calculate risk")
+
+        # Investor final summary
+        if investor_orders_checked > 0:
+            print(f"\n  └─ 📊 Audit Results for {user_brokerid}:")
+            print(f"       • Target Risk: ${default_risk:.2f}")
+            print(f"       • Maximum Risk: ${maximum_risk:.2f}")
+            print(f"       • Orders checked: {investor_orders_checked}")
+            print(f"       • Orders kept: {investor_orders_kept}")
+            if investor_orders_removed > 0:
+                print(f"       • Orders removed (exceeded maximum): {investor_orders_removed}")
+            else:
+                print(f"       ✅ No orders exceeded maximum threshold")
+            stats["processing_success"] = True
+        else:
+            print(f"  └─ 🔘 No pending orders found.")
+
+    # --- FINAL SUMMARY ---
+    print(f"\n{'='*10} 📊 RISK AUDIT SUMMARY (TARGET + MAXIMUM) {'='*10}")
+    print(f"   Investor ID: {stats['investor_id']}")
+    print(f"   Orders checked: {stats['orders_checked']}")
+    print(f"   Orders kept: {stats['orders_kept']}")
+    print(f"   Orders removed (exceeded max): {stats['orders_removed']}")
+    
+    if stats['default_risk_used'] is not None:
+        print(f"   Target risk used: ${stats['default_risk_used']:.2f}")
+    if stats['maximum_risk_used'] is not None:
+        print(f"   Maximum risk used: ${stats['maximum_risk_used']:.2f}")
+    
+    if stats['orders_checked'] > 0:
+        removal_rate = (stats['orders_removed'] / stats['orders_checked']) * 100
+        print(f"   Removal rate: {removal_rate:.1f}%")
+    
+    print(f"\n{'='*10} 🏁 RISK AUDIT COMPLETE {'='*10}\n")
+    return stats
+
+def orders_reward_correction(inv_id=None):
+    """
+    Function: Checks both live pending orders AND open positions (LIMIT, STOP, and MARKET)
+    and adjusts their take profit levels based on the NEAREST MATCHING strategy risk-reward ratio.
+    
+    INTELLIGENT APPROACH:
+    1. Calculate current R:R from order's exit/target prices
+    2. Compare with strategy-specific R:R values from accountmanagement.json
+    3. Find the nearest matching R:R (next higher value) and use that
+    4. Fall back to default selected_risk_reward if no match found
+    
+    Args:
+        inv_id: Optional specific investor ID to process. If None, processes all investors.
+        
+    Returns:
+        dict: Statistics about the processing
+    """
+    print(f"\n{'='*10} 📐 INTELLIGENT R:R CORRECTION: FINDING NEAREST STRATEGY MATCH {'='*10}")
+    if inv_id:
+        print(f" Processing single investor: {inv_id}")
+
+    # Track statistics
+    stats = {
+        "investor_id": inv_id if inv_id else "all",
+        "orders_checked": 0,
+        "orders_adjusted": 0,
+        "orders_skipped": 0,
+        "orders_error": 0,
+        "positions_checked": 0,
+        "positions_adjusted": 0,
+        "rr_matches": {},  # Track which R:R ratios were used
+        "rr_mismatches": 0,  # Track orders that didn't match any strategy
+        "processing_success": False
+    }
+
+    # Determine which investors to process
+    investors_to_process = [inv_id] if inv_id else usersdictionary.keys()
+    total_investors = len(investors_to_process) if not inv_id else 1
+    processed = 0
+
+    for user_brokerid in investors_to_process:
+        processed += 1
+        print(f"\n[{processed}/{total_investors}] {user_brokerid} 🔍 Loading R:R configurations...")
+        
+        # Get broker config
+        broker_cfg = usersdictionary.get(user_brokerid)
+        if not broker_cfg:
+            print(f"  └─  No broker config found")
+            continue
+        
+        inv_root = Path(INV_PATH) / user_brokerid
+        acc_mgmt_path = inv_root / "accountmanagement.json"
+
+        if not acc_mgmt_path.exists():
+            print(f"  └─ ⚠️  Account config missing. Skipping.")
+            continue
+
+        # --- LOAD CONFIG AND EXTRACT ALL AVAILABLE R:R VALUES ---
         try:
             with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
@@ -10968,15 +11260,36 @@ def orders_risk_correction(inv_id=None):
                 print(f"  └─ ⏭️  Risk-reward correction disabled in settings. Skipping.")
                 continue
             
-            # Get selected risk-reward ratios
-            selected_rr = config.get("selected_risk_reward", [2])
-            if not selected_rr:
-                print(f"  └─ ⚠️  No risk-reward ratios selected. Using default [2]")
-                selected_rr = [2]
+            # Get ALL available R:R values (both default and strategy-specific)
+            all_rr_values = []
             
-            # Use the first ratio in the list (typically the preferred one)
-            target_rr_ratio = float(selected_rr[0])
-            print(f"  └─ ✅ Target R:R Ratio: 1:{target_rr_ratio}")
+            # Add default selected_risk_reward
+            selected_rr = config.get("selected_risk_reward", [2])
+            if isinstance(selected_rr, list) and selected_rr:
+                default_rr = float(selected_rr[0])
+                all_rr_values.append(default_rr)
+            else:
+                default_rr = 2.0
+                all_rr_values.append(default_rr)
+            
+            # Add all strategy-specific R:R values
+            strategies_rr = config.get("strategies_risk_reward", {})
+            strategy_rr_values = []
+            for strategy, rr_value in strategies_rr.items():
+                try:
+                    rr_float = float(rr_value)
+                    strategy_rr_values.append(rr_float)
+                    all_rr_values.append(rr_float)
+                except (ValueError, TypeError):
+                    continue
+            
+            # Sort and deduplicate all available R:R values
+            all_rr_values = sorted(set(all_rr_values))
+            
+            print(f"  └─ 📊 Default R:R: 1:{default_rr}")
+            if strategy_rr_values:
+                print(f"  └─ 📋 Strategy R:R values: {', '.join([f'1:{v}' for v in sorted(set(strategy_rr_values))])}")
+            print(f"  └─ 🎯 All available R:R targets: {', '.join([f'1:{v}' for v in all_rr_values])}")
             
             # Get risk management mapping for balance-based risk
             risk_map = config.get("account_balance_default_risk_management", {})
@@ -10986,7 +11299,7 @@ def orders_risk_correction(inv_id=None):
             stats["orders_error"] += 1
             continue
 
-        # --- ACCOUNT INITIALIZATION (EXACT COPY FROM place_usd_orders_for_accounts) ---
+        # --- ACCOUNT INITIALIZATION ---
         print(f"  └─ 🔌 Initializing account connection...")
         
         login_id = int(broker_cfg['LOGIN_ID'])
@@ -11007,7 +11320,6 @@ def orders_risk_correction(inv_id=None):
             print(f"      ✅ Successfully logged into account")
         else:
             print(f"      ✅ Already logged into account")
-        # --- END EXACT INITIALIZATION COPY ---
 
         acc_info = mt5.account_info()
         if not acc_info:
@@ -11045,7 +11357,33 @@ def orders_risk_correction(inv_id=None):
             stats["orders_skipped"] += 1
             continue
 
-        print(f"\n  └─ 💰 Balance: ${balance:,.2f} | Base Risk: ${primary_risk:.2f} | Target R:R: 1:{target_rr_ratio}")
+        print(f"\n  └─ 💰 Balance: ${balance:,.2f} | Base Risk: ${primary_risk:.2f}")
+
+        # --- HELPER FUNCTION: Find nearest matching R:R ---
+        def find_nearest_rr(current_rr, available_rr_values):
+            """
+            Find the nearest matching R:R value from available options.
+            Prefers next higher value, but if none exists, uses the closest.
+            """
+            if not available_rr_values:
+                return None, "none"
+            
+            # Sort available values
+            sorted_values = sorted(available_rr_values)
+            
+            # Find the next higher value (preferred)
+            next_higher = None
+            for val in sorted_values:
+                if val >= current_rr:
+                    next_higher = val
+                    break
+            
+            if next_higher is not None:
+                return next_higher, "next_higher"
+            
+            # If no higher value, use the closest (should be the maximum)
+            closest = min(sorted_values, key=lambda x: abs(x - current_rr))
+            return closest, "closest"
 
         # --- CHECK AND ADJUST ALL POSITIONS (OPEN MARKET ORDERS) ---
         positions = mt5.positions_get()
@@ -11099,33 +11437,66 @@ def orders_risk_correction(inv_id=None):
                     stats["orders_skipped"] += 1
                     continue
                 
-                # For positions, risk is from current price to SL (or entry to SL if price moved favorably)
-                # We use the more conservative approach: risk based on original entry to SL
-                # This ensures we don't reduce TP if price has moved in our favor
+                # For positions, risk is from entry to SL
                 if is_buy:
-                    # For BUY: entry price is position.price_open
-                    risk_price = position.price_open - position.sl
+                    risk_distance = position.price_open - position.sl
                 else:
-                    # For SELL: entry price is position.price_open
-                    risk_price = position.sl - position.price_open
+                    risk_distance = position.sl - position.price_open
                 
-                # Calculate risk in money
-                risk_points = abs(risk_price) / symbol_info.point
-                point_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size * symbol_info.point
-                current_risk_usd = round(risk_points * point_value * position.volume, 2)
-                
-                # Alternative: calculate using MT5 profit calculator for accuracy
+                # Calculate risk in money using MT5 profit calculator for accuracy
                 calc_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
                 sl_profit = mt5.order_calc_profit(calc_type, position.symbol, position.volume, 
                                                   position.price_open, position.sl)
                 
                 if sl_profit is not None:
                     current_risk_usd = round(abs(sl_profit), 2)
+                else:
+                    # Fallback calculation
+                    risk_points = abs(risk_distance) / symbol_info.point
+                    point_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size * symbol_info.point
+                    current_risk_usd = round(risk_points * point_value * position.volume, 2)
+                
+                # Calculate current R:R if TP exists
+                current_rr = None
+                if position.tp != 0:
+                    if is_buy:
+                        tp_distance = position.tp - position.price_open
+                    else:
+                        tp_distance = position.price_open - position.tp
+                    
+                    if risk_distance > 0:
+                        current_rr = round(tp_distance / risk_distance, 2)
+                        print(f"       Current R:R: 1:{current_rr}")
+                    else:
+                        current_rr = None
+                
+                # Find target R:R based on current value
+                if current_rr is not None:
+                    target_rr, match_type = find_nearest_rr(current_rr, all_rr_values)
+                    
+                    if match_type == "next_higher":
+                        print(f"       🔍 Using next higher R:R: 1:{target_rr} (from 1:{current_rr})")
+                    elif match_type == "closest":
+                        print(f"       🔍 Using closest R:R: 1:{target_rr} (from 1:{current_rr}) - no higher value")
+                    else:
+                        target_rr = default_rr
+                        print(f"       ℹ️  Using default R:R: 1:{target_rr}")
+                    
+                    # Track R:R usage
+                    rr_key = str(target_rr)
+                    if rr_key not in stats["rr_matches"]:
+                        stats["rr_matches"][rr_key] = 0
+                    stats["rr_matches"][rr_key] += 1
+                else:
+                    # If no current R:R, use default
+                    target_rr = default_rr
+                    print(f"       ℹ️  No current R:R found, using default: 1:{target_rr}")
+                    stats["rr_mismatches"] += 1
                 
                 # Calculate required take profit based on risk and target R:R ratio
-                target_profit_usd = current_risk_usd * target_rr_ratio
+                target_profit_usd = current_risk_usd * target_rr
                 
-                print(f"       Risk (from entry): ${current_risk_usd:.2f} | Target Profit: ${target_profit_usd:.2f}")
+                print(f"       Risk: ${current_risk_usd:.2f} | Target Profit: ${target_profit_usd:.2f} (1:{target_rr})")
                 
                 # Calculate the take profit price that would achieve this profit
                 tick_value = symbol_info.trade_tick_value
@@ -11142,12 +11513,10 @@ def orders_risk_correction(inv_id=None):
                     digits = symbol_info.digits
                     price_move_needed = round(price_move_needed, digits)
                     
-                    # Calculate new take profit price based on position type (from entry price, not current price)
+                    # Calculate new take profit price based on position type (from entry price)
                     if is_buy:
-                        # For BUY positions: TP above entry price
                         new_tp = round(position.price_open + price_move_needed, digits)
                     else:
-                        # For SELL positions: TP below entry price
                         new_tp = round(position.price_open - price_move_needed, digits)
                     
                     # Check if current TP is significantly different from calculated TP
@@ -11191,7 +11560,7 @@ def orders_risk_correction(inv_id=None):
                             investor_positions_adjusted += 1
                             stats["positions_adjusted"] += 1
                             stats["orders_adjusted"] += 1
-                            print(f"       ✅ TP adjusted successfully to {new_tp:.{digits}f}")
+                            print(f"       ✅ TP adjusted successfully to {new_tp:.{digits}f} (Target R:R: 1:{target_rr})")
                         else:
                             investor_positions_error += 1
                             stats["orders_error"] += 1
@@ -11309,10 +11678,48 @@ def orders_risk_correction(inv_id=None):
 
                 current_risk_usd = round(abs(sl_profit), 2)
                 
-                # Calculate required take profit based on risk and target R:R ratio
-                target_profit_usd = current_risk_usd * target_rr_ratio
+                # Calculate current R:R if TP exists
+                current_rr = None
+                if order.tp != 0:
+                    if is_buy:
+                        tp_distance = order.tp - order.price_open
+                    else:
+                        tp_distance = order.price_open - order.tp
+                    
+                    risk_distance = abs(order.sl - order.price_open)
+                    if risk_distance > 0:
+                        current_rr = round(tp_distance / risk_distance, 2)
+                        print(f"       Current R:R: 1:{current_rr}")
+                    else:
+                        current_rr = None
                 
-                print(f"       Risk: ${current_risk_usd:.2f} | Target Profit: ${target_profit_usd:.2f}")
+                # Find target R:R based on current value
+                if current_rr is not None:
+                    target_rr, match_type = find_nearest_rr(current_rr, all_rr_values)
+                    
+                    if match_type == "next_higher":
+                        print(f"       🔍 Using next higher R:R: 1:{target_rr} (from 1:{current_rr})")
+                    elif match_type == "closest":
+                        print(f"       🔍 Using closest R:R: 1:{target_rr} (from 1:{current_rr}) - no higher value")
+                    else:
+                        target_rr = default_rr
+                        print(f"       ℹ️  Using default R:R: 1:{target_rr}")
+                    
+                    # Track R:R usage
+                    rr_key = str(target_rr)
+                    if rr_key not in stats["rr_matches"]:
+                        stats["rr_matches"][rr_key] = 0
+                    stats["rr_matches"][rr_key] += 1
+                else:
+                    # If no current R:R, use default
+                    target_rr = default_rr
+                    print(f"       ℹ️  No current R:R found, using default: 1:{target_rr}")
+                    stats["rr_mismatches"] += 1
+                
+                # Calculate required take profit based on risk and target R:R ratio
+                target_profit_usd = current_risk_usd * target_rr
+                
+                print(f"       Risk: ${current_risk_usd:.2f} | Target Profit: ${target_profit_usd:.2f} (1:{target_rr})")
                 
                 # Calculate the take profit price that would achieve this profit
                 tick_value = symbol_info.trade_tick_value
@@ -11331,10 +11738,8 @@ def orders_risk_correction(inv_id=None):
                     
                     # Calculate new take profit price based on order type
                     if is_buy:
-                        # For BUY orders: TP above entry
                         new_tp = round(order.price_open + price_move_needed, digits)
                     else:
-                        # For SELL orders: TP below entry
                         new_tp = round(order.price_open - price_move_needed, digits)
                     
                     # Check if current TP is significantly different from calculated TP
@@ -11378,7 +11783,7 @@ def orders_risk_correction(inv_id=None):
                         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                             investor_orders_adjusted += 1
                             stats["orders_adjusted"] += 1
-                            print(f"       ✅ TP adjusted successfully to {new_tp:.{digits}f}")
+                            print(f"       ✅ TP adjusted successfully to {new_tp:.{digits}f} (Target R:R: 1:{target_rr})")
                         else:
                             investor_orders_error += 1
                             stats["orders_error"] += 1
@@ -11448,7 +11853,7 @@ def orders_risk_correction(inv_id=None):
         total_adjusted = investor_positions_adjusted + investor_orders_adjusted
         
         if total_checked > 0:
-            print(f"\n  └─ 📊 Risk-Reward Correction Results for {user_brokerid}:")
+            print(f"\n  └─ 📊 Intelligent R:R Correction Results for {user_brokerid}:")
             if investor_positions_checked > 0:
                 print(f"       • Positions checked: {investor_positions_checked}")
                 print(f"       • Positions adjusted: {investor_positions_adjusted}")
@@ -11466,7 +11871,7 @@ def orders_risk_correction(inv_id=None):
             print(f"  └─ 🔘 No positions or pending orders found.")
 
     # --- FINAL SUMMARY ---
-    print(f"\n{'='*10} 📊 RISK-REWARD CORRECTION SUMMARY {'='*10}")
+    print(f"\n{'='*10} 📊 INTELLIGENT R:R CORRECTION SUMMARY {'='*10}")
     print(f"   Investor ID: {stats['investor_id']}")
     print(f"   Positions checked: {stats['positions_checked']}")
     print(f"   Positions adjusted: {stats['positions_adjusted']}")
@@ -11477,110 +11882,21 @@ def orders_risk_correction(inv_id=None):
     print(f"   Orders skipped: {stats['orders_skipped']}")
     print(f"   Errors: {stats['orders_error']}")
     
+    if stats["rr_matches"]:
+        print(f"\n   📊 R:R Usage Breakdown:")
+        for rr, count in sorted(stats["rr_matches"].items()):
+            print(f"       • 1:{rr}: {count} orders")
+    if stats["rr_mismatches"] > 0:
+        print(f"   ⚠️  Orders using default R:R (no match): {stats['rr_mismatches']}")
+    
     total_checked = stats['positions_checked'] + stats['orders_checked']
     total_adjusted = stats['positions_adjusted'] + stats['orders_adjusted']
     if total_checked > 0:
         success_rate = (total_adjusted / total_checked) * 100
         print(f"   Adjustment success rate: {success_rate:.1f}%")
     
-    print(f"\n{'='*10} 🏁 POSITIONS & PENDING ORDERS RISK-REWARD CORRECTION COMPLETE {'='*10}\n")
+    print(f"\n{'='*10} 🏁 INTELLIGENT R:R CORRECTION COMPLETE {'='*10}\n")
     return stats
-
-def history_closed_orders_removal_in_pendingorders(inv_id=None):
-    """
-    Scans history for the last 48 hours. If a position was closed, 
-    any pending limit orders with the same first 4 digits in the price 
-    are cancelled to prevent re-entry.
-    
-    Args:
-        inv_id (str, optional): Specific investor ID to process. If None, processes all investors.
-        MT5 should already be initialized and logged in for this investor.
-    
-    Returns:
-        bool: True if any orders were removed, False otherwise
-    """
-    from datetime import datetime, timedelta
-    print(f"\n{'='*10} 📜 HISTORY AUDIT: PREVENTING RE-ENTRY {'='*10}")
-
-    # Determine which investors to process
-    if inv_id:
-        investor_ids = [inv_id]
-    else:
-        investor_ids = list(usersdictionary.keys())
-    
-    if not investor_ids:
-        print(" └─ 🔘 No investors found.")
-        return False
-
-    any_orders_removed = False
-
-    for user_brokerid in investor_ids:
-        print(f" [{user_brokerid}] 🔍 Checking 48h history for duplicates...")
-        
-        broker_cfg = usersdictionary.get(user_brokerid)
-        if not broker_cfg:
-            print(f"  └─ No No broker config found for {user_brokerid}")
-            continue
-
-        # 1. Define the 48-hour window
-        from_date = datetime.now() - timedelta(hours=48)
-        to_date = datetime.now()
-
-        # 2. Get Closed Positions (Deals)
-        history_deals = mt5.history_deals_get(from_date, to_date)
-        if history_deals is None:
-            print(f"  └─ ⚠️ Could not access history for {user_brokerid}")
-            continue
-
-        # 3. Create a set of "Used Price Prefixes"
-        # We store: (symbol, price_prefix)
-        used_entries = set()
-        for deal in history_deals:
-            # Only look at actual trades (buy/sell) that were closed
-            if deal.entry in [mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]:
-                # Extract first 3 significant digits of the price
-                # We remove the decimal to handle 0.856 and 1901 uniformly
-                clean_price = str(deal.price).replace('.', '')[:4]
-                used_entries.add((deal.symbol, clean_price))
-
-        if not used_entries:
-            print(f"  └─ ✅ No closed orders found in last 48h.")
-            continue
-
-        # 4. Check Current Pending Orders
-        pending_orders = mt5.orders_get()
-        removed_count = 0
-        orders_checked = 0
-
-        if pending_orders:
-            for order in pending_orders:
-                # Only target limit orders
-                if order.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT]:
-                    orders_checked += 1
-                    order_price_prefix = str(order.price_open).replace('.', '')[:4]
-                    
-                    # If this symbol + price prefix exists in history, kill the order
-                    if (order.symbol, order_price_prefix) in used_entries:
-                        print(f"  └─ 🚫 DUPLICATE FOUND: {order.symbol} at {order.price_open}")
-                        print(f"     Match found in history (Prefix: {order_price_prefix}). Cancelling...")
-                        
-                        cancel_request = {
-                            "action": mt5.TRADE_ACTION_REMOVE,
-                            "order": order.ticket
-                        }
-                        res = mt5.order_send(cancel_request)
-                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                            removed_count += 1
-                            any_orders_removed = True
-                            print(f"     ✅ Order #{order.ticket} cancelled successfully")
-                        else:
-                            error_msg = res.comment if res else f"Error code: {res.retcode if res else 'Unknown'}"
-                            print(f"     No Failed to cancel #{order.ticket}: {error_msg}")
-
-        print(f"  └─ 📊 Cleanup Result: {removed_count} duplicate limit orders removed out of {orders_checked} checked.")
-
-    print(f"\n{'='*10} 🏁 HISTORY AUDIT COMPLETE {'='*10}\n")
-    return any_orders_removed
 
 def apply_dynamic_breakeven(inv_id=None):
     """
@@ -11621,7 +11937,7 @@ def apply_dynamic_breakeven(inv_id=None):
         # Get broker config
         broker_cfg = usersdictionary.get(user_brokerid)
         if not broker_cfg:
-            print(f"  └─ No No broker config found")
+            print(f"  └─  No broker config found")
             continue
         
         inv_root = Path(INV_PATH) / user_brokerid
@@ -11661,7 +11977,7 @@ def apply_dynamic_breakeven(inv_id=None):
                 print(f"       • At {level['reward']}R profit → Move SL to {level['breakeven_at_reward']}R")
             
         except Exception as e:
-            print(f"  └─ No Failed to read config: {e}")
+            print(f"  └─  Failed to read config: {e}")
             stats["positions_error"] += 1
             continue
 
@@ -11680,7 +11996,7 @@ def apply_dynamic_breakeven(inv_id=None):
             print(f"      🔑 Logging into account...")
             if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
                 error = mt5.last_error()
-                print(f"  └─ No login failed: {error}")
+                print(f"  └─  login failed: {error}")
                 stats["positions_error"] += 1
                 continue
             print(f"      ✅ Successfully logged into account")
@@ -11689,7 +12005,7 @@ def apply_dynamic_breakeven(inv_id=None):
 
         acc_info = mt5.account_info()
         if not acc_info:
-            print(f"  └─ No Failed to get account info")
+            print(f"  └─  Failed to get account info")
             stats["positions_error"] += 1
             continue
             
@@ -11891,7 +12207,7 @@ def apply_dynamic_breakeven(inv_id=None):
                             investor_positions_error += 1
                             stats["positions_error"] += 1
                             error_msg = result.comment if result else f"Error code: {result.retcode if result else 'Unknown'}"
-                            print(f"       No Modification failed: {error_msg}")
+                            print(f"        Modification failed: {error_msg}")
                 else:
                     print(f"       ⚠️  Invalid target reward: {target_reward}")
                     investor_positions_skipped += 1
@@ -11928,447 +12244,6 @@ def apply_dynamic_breakeven(inv_id=None):
     print(f"\n{'='*10} 🏁 DYNAMIC BREAKEVEN MONITORING COMPLETE {'='*10}\n")
     return stats
 
-def history_closed_orders_removal_in_pendingorders(inv_id=None):
-    """
-    Scans history for the last 48 hours. If a position was closed, 
-    any pending limit orders with the same first 4 digits in the price 
-    are cancelled to prevent re-entry.
-    
-    Args:
-        inv_id (str, optional): Specific investor ID to process. If None, processes all investors.
-        MT5 should already be initialized and logged in for this investor.
-    
-    Returns:
-        bool: True if any orders were removed, False otherwise
-    """
-    from datetime import datetime, timedelta
-    print(f"\n{'='*10} 📜 HISTORY AUDIT: PREVENTING RE-ENTRY {'='*10}")
-
-    # Determine which investors to process
-    if inv_id:
-        investor_ids = [inv_id]
-    else:
-        investor_ids = list(usersdictionary.keys())
-    
-    if not investor_ids:
-        print(" └─ 🔘 No investors found.")
-        return False
-
-    any_orders_removed = False
-
-    for user_brokerid in investor_ids:
-        print(f" [{user_brokerid}] 🔍 Checking 48h history for duplicates...")
-        
-        broker_cfg = usersdictionary.get(user_brokerid)
-        if not broker_cfg:
-            print(f"  └─ No No broker config found for {user_brokerid}")
-            continue
-
-        # 1. Define the 48-hour window
-        from_date = datetime.now() - timedelta(hours=48)
-        to_date = datetime.now()
-
-        # 2. Get Closed Positions (Deals)
-        history_deals = mt5.history_deals_get(from_date, to_date)
-        if history_deals is None:
-            print(f"  └─ ⚠️ Could not access history for {user_brokerid}")
-            continue
-
-        # 3. Create a set of "Used Price Prefixes"
-        # We store: (symbol, price_prefix)
-        used_entries = set()
-        for deal in history_deals:
-            # Only look at actual trades (buy/sell) that were closed
-            if deal.entry in [mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]:
-                # Extract first 3 significant digits of the price
-                # We remove the decimal to handle 0.856 and 1901 uniformly
-                clean_price = str(deal.price).replace('.', '')[:4]
-                used_entries.add((deal.symbol, clean_price))
-
-        if not used_entries:
-            print(f"  └─ ✅ No closed orders found in last 48h.")
-            continue
-
-        # 4. Check Current Pending Orders
-        pending_orders = mt5.orders_get()
-        removed_count = 0
-        orders_checked = 0
-
-        if pending_orders:
-            for order in pending_orders:
-                # Only target limit orders
-                if order.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT]:
-                    orders_checked += 1
-                    order_price_prefix = str(order.price_open).replace('.', '')[:4]
-                    
-                    # If this symbol + price prefix exists in history, kill the order
-                    if (order.symbol, order_price_prefix) in used_entries:
-                        print(f"  └─ 🚫 DUPLICATE FOUND: {order.symbol} at {order.price_open}")
-                        print(f"     Match found in history (Prefix: {order_price_prefix}). Cancelling...")
-                        
-                        cancel_request = {
-                            "action": mt5.TRADE_ACTION_REMOVE,
-                            "order": order.ticket
-                        }
-                        res = mt5.order_send(cancel_request)
-                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                            removed_count += 1
-                            any_orders_removed = True
-                            print(f"     ✅ Order #{order.ticket} cancelled successfully")
-                        else:
-                            error_msg = res.comment if res else f"Error code: {res.retcode if res else 'Unknown'}"
-                            print(f"     No Failed to cancel #{order.ticket}: {error_msg}")
-
-        print(f"  └─ 📊 Cleanup Result: {removed_count} duplicate limit orders removed out of {orders_checked} checked.")
-
-    print(f"\n{'='*10} 🏁 HISTORY AUDIT COMPLETE {'='*10}\n")
-    return any_orders_removed
-
-def apply_dynamic_breakeven(inv_id=None):
-    """
-    Function: Dynamically moves stop loss to breakeven or partial profit levels based on
-    running profit reward multiples. Uses breakeven_dictionary from accountmanagement.json
-    to determine at which reward levels to adjust SL.
-    
-    Args:
-        inv_id: Optional specific investor ID to process. If None, processes all investors.
-        
-    Returns:
-        dict: Statistics about the processing
-    """
-    print(f"\n{'='*10} 🎯 DYNAMIC BREAKEVEN: MONITORING RUNNING PROFIT REWARDS {'='*10}")
-    if inv_id:
-        print(f" Processing single investor: {inv_id}")
-
-    # Track statistics
-    stats = {
-        "investor_id": inv_id if inv_id else "all",
-        "positions_checked": 0,
-        "positions_adjusted": 0,
-        "positions_skipped": 0,
-        "positions_error": 0,
-        "breakeven_events": 0,
-        "processing_success": False
-    }
-
-    # Determine which investors to process
-    investors_to_process = [inv_id] if inv_id else usersdictionary.keys()
-    total_investors = len(investors_to_process) if not inv_id else 1
-    processed = 0
-
-    for user_brokerid in investors_to_process:
-        processed += 1
-        print(f"\n[{processed}/{total_investors}] {user_brokerid} 🔍 Checking breakeven configurations...")
-        
-        # Get broker config
-        broker_cfg = usersdictionary.get(user_brokerid)
-        if not broker_cfg:
-            print(f"  └─ No No broker config found")
-            continue
-        
-        inv_root = Path(INV_PATH) / user_brokerid
-        acc_mgmt_path = inv_root / "accountmanagement.json"
-
-        if not acc_mgmt_path.exists():
-            print(f"  └─ ⚠️  Account config missing. Skipping.")
-            continue
-
-        # --- LOAD CONFIG AND CHECK SETTINGS ---
-        try:
-            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            # Check if breakeven is enabled
-            settings = config.get("settings", {})
-            if not settings.get("enable_breakeven", False):
-                print(f"  └─ ⏭️  Breakeven disabled in settings. Skipping.")
-                continue
-            
-            # Get breakeven dictionary
-            breakeven_config = settings.get("breakeven_dictionary", [])
-            if not breakeven_config:
-                print(f"  └─ ⚠️  No breakeven configuration found. Using default.")
-                # Default configuration if none provided
-                breakeven_config = [
-                    {"reward": 1, "breakeven_at_reward": 0.5},
-                    {"reward": 2, "breakeven_at_reward": 1},
-                    {"reward": 3, "breakeven_at_reward": 1.5}
-                ]
-            
-            # Sort by reward level (ascending) to process in order
-            breakeven_config.sort(key=lambda x: x["reward"])
-            
-            print(f"  └─ ✅ Breakeven enabled with {len(breakeven_config)} reward levels:")
-            for level in breakeven_config:
-                print(f"       • At {level['reward']}R profit → Move SL to {level['breakeven_at_reward']}R")
-            
-        except Exception as e:
-            print(f"  └─ No Failed to read config: {e}")
-            stats["positions_error"] += 1
-            continue
-
-        # --- ACCOUNT INITIALIZATION ---
-        print(f"  └─ 🔌 Initializing account connection...")
-        
-        login_id = int(broker_cfg['LOGIN_ID'])
-        mt5_path = broker_cfg["TERMINAL_PATH"]
-        
-        print(f"      • Terminal Path: {mt5_path}")
-        print(f"      • Login ID: {login_id}")
-
-        # Check login status
-        acc = mt5.account_info()
-        if acc is None or acc.login != login_id:
-            print(f"      🔑 Logging into account...")
-            if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
-                error = mt5.last_error()
-                print(f"  └─ No login failed: {error}")
-                stats["positions_error"] += 1
-                continue
-            print(f"      ✅ Successfully logged into account")
-        else:
-            print(f"      ✅ Already logged into account")
-
-        acc_info = mt5.account_info()
-        if not acc_info:
-            print(f"  └─ No Failed to get account info")
-            stats["positions_error"] += 1
-            continue
-            
-        balance = acc_info.balance
-        print(f"\n  └─ 📊 Account Balance: ${balance:,.2f}")
-
-        # --- CHECK ALL OPEN POSITIONS ---
-        positions = mt5.positions_get()
-        investor_positions_checked = 0
-        investor_positions_adjusted = 0
-        investor_positions_skipped = 0
-        investor_positions_error = 0
-        investor_breakeven_events = 0
-
-        # Define position types for better readability
-        POSITION_TYPES = {
-            mt5.POSITION_TYPE_BUY: "BUY",
-            mt5.POSITION_TYPE_SELL: "SELL"
-        }
-
-        if positions:
-            print(f"\n  └─ 🔍 Scanning {len(positions)} open positions for breakeven opportunities...")
-            
-            for position in positions:
-                investor_positions_checked += 1
-                stats["positions_checked"] += 1
-                
-                position_type_name = POSITION_TYPES.get(position.type, f"Unknown Type {position.type}")
-                
-                # Skip positions without SL
-                if position.sl == 0:
-                    print(f"\n    └─ 📋 Position #{position.ticket} | {position_type_name} | {position.symbol}")
-                    print(f"       ⚠️  No SL set - cannot manage breakeven. Skipping.")
-                    investor_positions_skipped += 1
-                    stats["positions_skipped"] += 1
-                    continue
-
-                # Get symbol info
-                symbol_info = mt5.symbol_info(position.symbol)
-                if not symbol_info:
-                    print(f"\n    └─ 📋 Position #{position.ticket} | {position.symbol}")
-                    print(f"       ⚠️  Cannot get symbol info. Skipping.")
-                    investor_positions_skipped += 1
-                    stats["positions_skipped"] += 1
-                    continue
-
-                # Determine position direction
-                is_buy = position.type == mt5.POSITION_TYPE_BUY
-                
-                print(f"\n    └─ 📋 Position #{position.ticket} | {position_type_name} | {position.symbol}")
-                
-                # Calculate current risk (from entry to original SL)
-                if is_buy:
-                    risk_distance = position.price_open - position.sl
-                else:
-                    risk_distance = position.sl - position.price_open
-                
-                risk_points = abs(risk_distance) / symbol_info.point
-                
-                # Calculate point value
-                tick_value = symbol_info.trade_tick_value
-                tick_size = symbol_info.trade_tick_size
-                
-                if tick_value > 0 and tick_size > 0:
-                    point_value = tick_value / tick_size * symbol_info.point
-                    risk_usd = round(risk_points * point_value * position.volume, 2)
-                else:
-                    # Fallback: calculate risk using profit calculator
-                    calc_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
-                    sl_profit = mt5.order_calc_profit(calc_type, position.symbol, position.volume, 
-                                                      position.price_open, position.sl)
-                    if sl_profit is not None:
-                        risk_usd = round(abs(sl_profit), 2)
-                    else:
-                        print(f"       ⚠️  Cannot calculate risk. Skipping.")
-                        investor_positions_skipped += 1
-                        stats["positions_skipped"] += 1
-                        continue
-
-                # Calculate current profit in R multiples
-                current_profit_usd = position.profit
-                
-                if risk_usd > 0:
-                    current_r_multiple = current_profit_usd / risk_usd
-                else:
-                    print(f"       ⚠️  Invalid risk value. Skipping.")
-                    investor_positions_skipped += 1
-                    stats["positions_skipped"] += 1
-                    continue
-
-                print(f"       • Risk: ${risk_usd:.2f} | Current P/L: ${current_profit_usd:.2f} ({current_r_multiple:.2f}R)")
-
-                # Skip if position is not in profit
-                if current_profit_usd <= 0:
-                    print(f"       ⏭️  Position not in profit. Skipping.")
-                    investor_positions_skipped += 1
-                    stats["positions_skipped"] += 1
-                    continue
-
-                # Find applicable breakeven rules
-                applicable_rules = []
-                for rule in breakeven_config:
-                    reward_threshold = rule["reward"]
-                    if current_r_multiple >= reward_threshold:
-                        applicable_rules.append(rule)
-                
-                if not applicable_rules:
-                    print(f"       ⏭️  No breakeven threshold reached (current: {current_r_multiple:.2f}R)")
-                    investor_positions_skipped += 1
-                    stats["positions_skipped"] += 1
-                    continue
-
-                # Get the highest applicable rule (last in sorted list)
-                highest_rule = applicable_rules[-1]
-                target_reward = highest_rule["breakeven_at_reward"]
-                
-                print(f"       🎯 Reached {highest_rule['reward']}R threshold")
-                print(f"       Target SL position: {target_reward}R")
-
-                # Calculate target SL price based on target reward
-                if target_reward >= 0:
-                    # For positive target reward, we want SL at entry + (risk_distance * target_reward)
-                    # But direction matters
-                    if is_buy:
-                        # For BUY: entry + (risk * target_reward)
-                        target_sl_price = position.price_open + (risk_distance * target_reward)
-                    else:
-                        # For SELL: entry - (risk * target_reward)
-                        target_sl_price = position.price_open - (risk_distance * target_reward)
-                    
-                    # Round to symbol digits
-                    digits = symbol_info.digits
-                    target_sl_price = round(target_sl_price, digits)
-                    
-                    print(f"       Current SL: {position.sl:.{digits}f}")
-                    print(f"       Target SL:  {target_sl_price:.{digits}f} ({target_reward}R)")
-                    
-                    # Check if SL needs adjustment
-                    current_sl_distance = abs(position.sl - position.price_open) if position.sl != 0 else 0
-                    target_sl_distance = abs(target_sl_price - position.price_open)
-                    
-                    # Calculate threshold (10% of target distance or 2 pips)
-                    pip_threshold = max(target_sl_distance * 0.1, symbol_info.point * 20)
-                    
-                    should_adjust = False
-                    
-                    if position.sl == 0:
-                        print(f"       📝 No SL currently set")
-                        should_adjust = True
-                    elif abs(current_sl_distance - target_sl_distance) > pip_threshold:
-                        print(f"       📐 SL needs adjustment")
-                        should_adjust = True
-                    else:
-                        # Check if we're moving in the right direction (should only move SL towards profit)
-                        if is_buy and target_sl_price > position.sl:
-                            print(f"       ✅ SL already at or beyond target")
-                            investor_positions_skipped += 1
-                            stats["positions_skipped"] += 1
-                            continue
-                        elif not is_buy and target_sl_price < position.sl:
-                            print(f"       ✅ SL already at or beyond target")
-                            investor_positions_skipped += 1
-                            stats["positions_skipped"] += 1
-                            continue
-                        else:
-                            should_adjust = True
-                    
-                    if should_adjust:
-                        # Ensure we're only moving SL in the profit direction
-                        if is_buy and target_sl_price <= position.sl:
-                            print(f"       ⚠️  Target SL would not improve position. Skipping.")
-                            investor_positions_skipped += 1
-                            stats["positions_skipped"] += 1
-                            continue
-                        elif not is_buy and target_sl_price >= position.sl:
-                            print(f"       ⚠️  Target SL would not improve position. Skipping.")
-                            investor_positions_skipped += 1
-                            stats["positions_skipped"] += 1
-                            continue
-                        
-                        # Prepare modification request
-                        modify_request = {
-                            "action": mt5.TRADE_ACTION_SLTP,
-                            "position": position.ticket,
-                            "sl": target_sl_price,
-                            "tp": position.tp,  # Keep existing TP
-                        }
-                        
-                        # Send modification
-                        result = mt5.order_send(modify_request)
-                        
-                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                            investor_positions_adjusted += 1
-                            investor_breakeven_events += 1
-                            stats["positions_adjusted"] += 1
-                            stats["breakeven_events"] += 1
-                            print(f"       ✅ SL adjusted successfully to {target_sl_price:.{digits}f} ({target_reward}R)")
-                        else:
-                            investor_positions_error += 1
-                            stats["positions_error"] += 1
-                            error_msg = result.comment if result else f"Error code: {result.retcode if result else 'Unknown'}"
-                            print(f"       No Modification failed: {error_msg}")
-                else:
-                    print(f"       ⚠️  Invalid target reward: {target_reward}")
-                    investor_positions_skipped += 1
-                    stats["positions_skipped"] += 1
-
-        # --- INVESTOR SUMMARY ---
-        if investor_positions_checked > 0:
-            print(f"\n  └─ 📊 Breakeven Results for {user_brokerid}:")
-            print(f"       • Positions checked: {investor_positions_checked}")
-            print(f"       • Positions adjusted: {investor_positions_adjusted}")
-            print(f"       • Breakeven events: {investor_breakeven_events}")
-            print(f"       • Positions skipped: {investor_positions_skipped}")
-            if investor_positions_error > 0:
-                print(f"       • Errors: {investor_positions_error}")
-            else:
-                print(f"       ✅ All breakeven checks completed successfully")
-            stats["processing_success"] = True
-        else:
-            print(f"  └─ 🔘 No open positions found.")
-
-    # --- FINAL SUMMARY ---
-    print(f"\n{'='*10} 📊 DYNAMIC BREAKEVEN SUMMARY {'='*10}")
-    print(f"   Investor ID: {stats['investor_id']}")
-    print(f"   Positions checked: {stats['positions_checked']}")
-    print(f"   Positions adjusted: {stats['positions_adjusted']}")
-    print(f"   Breakeven events: {stats['breakeven_events']}")
-    print(f"   Positions skipped: {stats['positions_skipped']}")
-    print(f"   Errors: {stats['positions_error']}")
-    
-    if stats['positions_checked'] > 0:
-        adjustment_rate = (stats['positions_adjusted'] / stats['positions_checked']) * 100
-        print(f"   Adjustment rate: {adjustment_rate:.1f}%")
-    
-    print(f"\n{'='*10} 🏁 DYNAMIC BREAKEVEN MONITORING COMPLETE {'='*10}\n")
-    return stats
 
 # real accounts 
 def process_phase_single_invest(inv_folder):
@@ -12531,7 +12406,7 @@ def process_phase_single_investor(inv_folder):
         apply_default_prices(inv_id=inv_id)
         martingale(inv_id=inv_id)
         place_usd_orders(inv_id=inv_id)
-        orders_risk_correction(inv_id=inv_id)
+        orders_reward_correction(inv_id=inv_id)
         check_pending_orders_risk(inv_id=inv_id)
         history_closed_orders_removal_in_pendingorders(inv_id=inv_id)
         apply_dynamic_breakeven(inv_id=inv_id)
@@ -12785,7 +12660,7 @@ def process_single_investor(inv_folder):
         apply_default_prices(inv_id=inv_id)
         martingale(inv_id=inv_id)
         place_usd_orders(inv_id=inv_id)
-        orders_risk_correction(inv_id=inv_id)
+        orders_reward_correction(inv_id=inv_id)
         check_pending_orders_risk(inv_id=inv_id)
         history_closed_orders_removal_in_pendingorders(inv_id=inv_id)
         apply_dynamic_breakeven(inv_id=inv_id)
