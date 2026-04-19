@@ -4,110 +4,1009 @@
         "server": "deriv-demo",
         "login": "40940152",
         "password": "@Techknowdge12#",
-        "application_status": "approved_with_bypass",
-        "broker_balance": 4684.12,
-        "profitandloss": -522.09,
-        "contract_days_left": "27",
-        "execution_start_date": "April 04, 2026",
-        "last_audit_timestamp": "2026-04-07T18:39:29.096989",
-        "current_balance": 4162.03,
+        "application_status": "approved",
+        "broker_balance": 3497.51,
+        "profitandloss": 0.0,
+        "contract_days_left": "46",
+        "execution_start_date": "May 05, 2026",
+        "last_audit_timestamp": "2026-04-19T09:38:45.734674",
+        "current_balance": 3497.51,
         "trades": {
             "summary": {
-                "total_trades": 9,
-                "won": 1,
-                "lost": 1,
+                "total_trades": 0,
+                "won": 0,
+                "lost": 0,
+                "symbols_that_lost": {},
+                "symbols_that_won": {}
+            },
+            "authorized_closed_trades": []
+        },
+        "authorized_tickets_count": 908,
+        "magic_number": 0,
+        "unauthorized_actions": {
+            "detected": false,
+            "bypass_active": true,
+            "autotrading_active": true,
+            "type": [],
+            "unauthorized_trades": [],
+            "unauthorized_withdrawals": [],
+            "unauthorized_orders": [],
+            "unauthorized_positions": []
+        }
+    },
+    "1": {
+        "id": "1",
+        "server": "Bybit-Live",
+        "login": "4836528",
+        "password": "@Techknowdge12#",
+        "application_status": "approved_with_bypass",
+        "broker_balance": 121.28,
+        "profitandloss": -121.28,
+        "contract_days_left": "21",
+        "execution_start_date": "April 10, 2026",
+        "last_audit_timestamp": "2026-04-19T09:38:45.088935",
+        "current_balance": 0.0,
+        "trades": {
+            "summary": {
+                "total_trades": 105,
+                "won": 20,
+                "lost": 84,
                 "symbols_that_lost": {
-                    "GBPUSD": -0.5
+                    "GBPUSD+": -57.42
                 },
                 "symbols_that_won": {
-                    "GBPUSD": 0.51
+                    "GBPUSD+": 47.58
                 }
             },
             "authorized_closed_trades": [
                 {
-                    "ticket": 4570474727,
-                    "symbol": "GBPUSD",
+                    "ticket": 158300818,
+                    "symbol": "GBPUSD+",
                     "type": "SELL",
-                    "volume": 10.0,
-                    "profit": 0.0,
-                    "time": "2026-04-07 16:56:32",
-                    "match_method": "ticket"
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 11:09:25",
+                    "match_method": "magic"
                 },
                 {
-                    "ticket": 4570479440,
-                    "symbol": "GBPUSD",
+                    "ticket": 158302220,
+                    "symbol": "GBPUSD+",
                     "type": "BUY",
                     "volume": 0.01,
-                    "profit": 0.0,
-                    "time": "2026-04-07 17:02:31",
-                    "match_method": "ticket"
+                    "profit": 0.5,
+                    "time": "2026-04-10 11:14:56",
+                    "match_method": "magic"
                 },
                 {
-                    "ticket": 4570479451,
-                    "symbol": "GBPUSD",
+                    "ticket": 158303170,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 11:20:51",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158304489,
+                    "symbol": "GBPUSD+",
                     "type": "BUY",
                     "volume": 0.01,
-                    "profit": 0.0,
-                    "time": "2026-04-07 17:03:03",
+                    "profit": -0.48,
+                    "time": "2026-04-10 11:23:19",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158303622,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-10 11:23:19",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158305421,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": 0.02,
+                    "time": "2026-04-10 11:26:25",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158305399,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 11:26:25",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158309379,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.52,
+                    "time": "2026-04-10 11:42:24",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158309567,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 11:43:30",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158312245,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.51,
+                    "time": "2026-04-10 11:58:11",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158312608,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 12:01:37",
                     "match_method": "ticket"
                 },
                 {
-                    "ticket": 4570482810,
-                    "symbol": "GBPUSD",
+                    "ticket": 158315728,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.52,
+                    "time": "2026-04-10 12:09:39",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158318977,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 12:20:01",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158325577,
+                    "symbol": "GBPUSD+",
                     "type": "SELL",
                     "volume": 0.01,
                     "profit": 0.51,
-                    "time": "2026-04-07 17:03:07",
-                    "match_method": "volume_symbol"
+                    "time": "2026-04-10 12:37:26",
+                    "match_method": "magic"
                 },
                 {
-                    "ticket": 4570484969,
-                    "symbol": "GBPUSD",
+                    "ticket": 158336872,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 12:59:54",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158336854,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 13:18:57",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158340907,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.61,
+                    "time": "2026-04-10 13:18:57",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158341500,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.7,
+                    "time": "2026-04-10 13:19:16",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158341685,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 13:19:26",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158341680,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 13:19:31",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158341915,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.47,
+                    "time": "2026-04-10 13:19:31",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158341931,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-10 13:21:01",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158343227,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.51,
+                    "time": "2026-04-10 13:21:01",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158343983,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -0.98,
+                    "time": "2026-04-10 13:22:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158343258,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.04,
+                    "profit": -0.24,
+                    "time": "2026-04-10 13:22:44",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158345190,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.04,
+                    "profit": -1.92,
+                    "time": "2026-04-10 13:26:34",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158344001,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.14,
+                    "profit": -0.84,
+                    "time": "2026-04-10 13:26:34",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158346184,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.14,
+                    "profit": 4.48,
+                    "time": "2026-04-10 13:30:12",
+                    "match_method": "timestamp"
+                },
+                {
+                    "ticket": 158346391,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 13:31:11",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158349022,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.52,
+                    "time": "2026-04-10 13:43:00",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158377468,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 15:32:28",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158380321,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.5,
+                    "time": "2026-04-10 15:48:09",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158386858,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 16:15:25",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158390703,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.14,
+                    "profit": -0.84,
+                    "time": "2026-04-10 16:30:01",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158390844,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.56,
+                    "time": "2026-04-10 16:30:01",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158391790,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.14,
+                    "profit": 10.08,
+                    "time": "2026-04-10 16:30:07",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158391879,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.07,
+                    "profit": -0.42,
+                    "time": "2026-04-10 16:30:14",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158392125,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.08,
+                    "profit": -0.48,
+                    "time": "2026-04-10 16:30:24",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158392228,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.07,
+                    "profit": -3.5,
+                    "time": "2026-04-10 16:30:24",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158393735,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 16:36:48",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158401662,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.52,
+                    "time": "2026-04-10 16:46:54",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158401051,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-10 16:46:54",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158409676,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -1.16,
+                    "time": "2026-04-10 17:02:47",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158401685,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.03,
+                    "profit": -0.18,
+                    "time": "2026-04-10 17:02:47",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158412334,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 17:08:17",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158412658,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.03,
+                    "profit": 1.32,
+                    "time": "2026-04-10 17:09:29",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158414320,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.48,
+                    "time": "2026-04-10 17:15:37",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158412663,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-10 17:15:37",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158415951,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -0.98,
+                    "time": "2026-04-10 17:19:53",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158414407,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.18,
+                    "profit": -1.08,
+                    "time": "2026-04-10 17:19:53",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158416710,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.16,
+                    "profit": -0.96,
+                    "time": "2026-04-10 17:21:36",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158416769,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.18,
+                    "profit": 9.36,
+                    "time": "2026-04-10 17:21:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158419109,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.16,
+                    "profit": 7.84,
+                    "time": "2026-04-10 17:28:47",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158419096,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 17:28:48",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158420598,
+                    "symbol": "GBPUSD+",
                     "type": "SELL",
                     "volume": 0.01,
                     "profit": -0.5,
-                    "time": "2026-04-07 17:05:01",
-                    "match_method": "volume_symbol"
+                    "time": "2026-04-10 17:31:30",
+                    "match_method": "magic"
                 },
                 {
-                    "ticket": 4570489504,
-                    "symbol": "GBPUSD",
-                    "type": "BUY",
-                    "volume": 0.01,
-                    "profit": 0.0,
-                    "time": "2026-04-07 17:14:26",
+                    "ticket": 158419183,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-10 17:31:30",
                     "match_method": "ticket"
                 },
                 {
-                    "ticket": 4570489508,
-                    "symbol": "GBPUSD",
+                    "ticket": 158421962,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": 1.02,
+                    "time": "2026-04-10 17:34:45",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158422129,
+                    "symbol": "GBPUSD+",
                     "type": "BUY",
                     "volume": 0.01,
-                    "profit": 0.0,
-                    "time": "2026-04-07 17:23:16",
+                    "profit": -0.06,
+                    "time": "2026-04-10 17:34:58",
                     "match_method": "ticket"
                 },
                 {
-                    "ticket": 4570489513,
-                    "symbol": "GBPUSD",
+                    "ticket": 158423511,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.02,
+                    "time": "2026-04-10 17:37:57",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158423571,
+                    "symbol": "GBPUSD+",
                     "type": "BUY",
                     "volume": 0.01,
-                    "profit": 0.0,
-                    "time": "2026-04-07 17:23:18",
+                    "profit": -0.06,
+                    "time": "2026-04-10 17:38:02",
                     "match_method": "ticket"
                 },
                 {
-                    "ticket": 4570515951,
-                    "symbol": "GBPUSD",
+                    "ticket": 158424052,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.01,
+                    "time": "2026-04-10 17:39:21",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158424047,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 17:39:21",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158424056,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-10 17:39:23",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158427669,
+                    "symbol": "GBPUSD+",
                     "type": "BUY",
                     "volume": 0.01,
                     "profit": 0.0,
-                    "time": "2026-04-07 17:41:10",
+                    "time": "2026-04-10 17:49:11",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158427790,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-10 17:52:09",
                     "match_method": "ticket"
+                },
+                {
+                    "ticket": 158428422,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.51,
+                    "time": "2026-04-10 17:52:09",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158659601,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-13 08:34:57",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158677243,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.48,
+                    "time": "2026-04-13 10:00:38",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158660819,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-13 10:00:38",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158687351,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-13 10:48:00",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158688658,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.5,
+                    "time": "2026-04-13 10:48:00",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158691955,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.5,
+                    "time": "2026-04-13 10:58:22",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158696011,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-13 11:05:55",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158707079,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.53,
+                    "time": "2026-04-13 11:22:00",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158706194,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-13 11:22:00",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158709749,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": 1.04,
+                    "time": "2026-04-13 11:31:34",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158710363,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-13 11:35:37",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158715971,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.49,
+                    "time": "2026-04-13 11:51:08",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158715357,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.03,
+                    "profit": -0.18,
+                    "time": "2026-04-13 11:51:08",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158719982,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.05,
+                    "profit": -0.3,
+                    "time": "2026-04-13 12:16:04",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158724903,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.03,
+                    "profit": -1.65,
+                    "time": "2026-04-13 12:16:04",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158727476,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.05,
+                    "profit": -2.75,
+                    "time": "2026-04-13 12:24:11",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158727261,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.07,
+                    "profit": -0.42,
+                    "time": "2026-04-13 12:24:11",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158732159,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.07,
+                    "profit": -3.43,
+                    "time": "2026-04-13 12:39:37",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158727710,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.09,
+                    "profit": -0.54,
+                    "time": "2026-04-13 12:39:37",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158743514,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.09,
+                    "profit": -5.85,
+                    "time": "2026-04-13 13:00:11",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 158732312,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.11,
+                    "profit": -0.66,
+                    "time": "2026-04-13 13:00:11",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 158748801,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.11,
+                    "profit": -7.15,
+                    "time": "2026-04-13 13:10:28",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 160131329,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-15 10:13:23",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 160132673,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": 1.04,
+                    "time": "2026-04-15 10:13:30",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 160132735,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-15 10:18:03",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 160144705,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-15 10:48:39",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 160149238,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -1.14,
+                    "time": "2026-04-15 11:01:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 160144706,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-15 11:01:44",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 160152521,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.04,
+                    "profit": -0.24,
+                    "time": "2026-04-15 11:18:42",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 160156154,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -1.02,
+                    "time": "2026-04-15 11:18:42",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 160156266,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.06,
+                    "profit": -0.36,
+                    "time": "2026-04-15 11:24:19",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 160157402,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.04,
+                    "profit": -2.08,
+                    "time": "2026-04-15 11:24:19",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 160160396,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.06,
+                    "profit": -3.06,
+                    "time": "2026-04-15 11:30:26",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 162559572,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-04-17 14:14:48",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 162566842,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-17 14:40:19",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 162576290,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.86,
+                    "time": "2026-04-17 14:40:19",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 162622885,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -0.12,
+                    "time": "2026-04-17 15:23:58",
+                    "match_method": "ticket"
+                },
+                {
+                    "ticket": 162769176,
+                    "symbol": "GBPUSD+",
+                    "type": "BUY",
+                    "volume": 0.02,
+                    "profit": -2.44,
+                    "time": "2026-04-17 16:25:22",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 162796679,
+                    "symbol": "GBPUSD+",
+                    "type": "SELL",
+                    "volume": 0.02,
+                    "profit": 6.52,
+                    "time": "2026-04-17 16:47:46",
+                    "match_method": "magic"
                 }
             ]
         },
-        "authorized_tickets_count": 609,
+        "authorized_tickets_count": 2490,
         "magic_number": 0,
         "unauthorized_actions": {
             "detected": true,
