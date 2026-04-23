@@ -2075,6 +2075,321 @@ def update_investor_info(inv_id=None):
 
 
 #---   ##STRATEGY##  ----#
+def symbol_spread_alert(inv_id):
+    """
+    Lightweight spread check that saves results but is faster than full symbol_spread().
+    Checks last 60 minutes of spread data, compares with current spread,
+    and saves to {symbol}_spread.json files.
+    
+    Parameters:
+    - inv_id: The investor ID to process
+    
+    Returns:
+    - tuple: (is_wide, details_dict, global_warning_updated)
+    """
+    
+    # Allow modification of global variable
+    global SPREAD_WIDE_WARNING
+    
+    # =========================================================================
+    # CONSTANTS
+    # =========================================================================
+    SPREAD_WARNING_MULTIPLIER = 5  # 5x threshold
+    LOOKBACK_MINUTES = 60
+    SLEEP_BETWEEN_SYMBOLS = 0.2  # Reduced sleep for faster execution
+    
+    # =========================================================================
+    # HELPER FUNCTIONS (minimal versions)
+    # =========================================================================
+    
+    def load_investor_users_light():
+        """Load investor users config from JSON file."""
+        INVESTOR_USERS_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\demo_investors.json"
+        
+        if not os.path.exists(INVESTOR_USERS_PATH):
+            return {}
+        
+        try:
+            with open(INVESTOR_USERS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Extract target folder from INVESTED_WITH
+            for investor_id, cfg in data.items():
+                if "INVESTED_WITH" in cfg:
+                    invested_with = cfg["INVESTED_WITH"]
+                    if "_" in invested_with:
+                        target_folder = invested_with.split("_", 1)[1]
+                        cfg["TARGET_FOLDER"] = target_folder
+                    else:
+                        cfg["TARGET_FOLDER"] = invested_with
+            
+            return data
+        except Exception:
+            return {}
+    
+    def load_symbols_light(investor_id):
+        """Quickly load symbols from accountmanagement.json."""
+        accountmanagement_path = os.path.join(INV_PATH, investor_id, "accountmanagement.json")
+        
+        if not os.path.exists(accountmanagement_path):
+            return []
+        
+        try:
+            with open(accountmanagement_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            symbols_dict = data.get("symbols_dictionary", {})
+            if not symbols_dict:
+                return []
+            
+            # Collect all symbols
+            all_symbols = []
+            for category, symbol_list in symbols_dict.items():
+                if isinstance(symbol_list, list):
+                    all_symbols.extend(symbol_list)
+                elif isinstance(symbol_list, str):
+                    all_symbols.append(symbol_list)
+            
+            # Remove duplicates while preserving order
+            unique_symbols = []
+            seen = set()
+            for symbol in all_symbols:
+                if symbol not in seen:
+                    unique_symbols.append(symbol)
+                    seen.add(symbol)
+            
+            return unique_symbols
+        except Exception:
+            return []
+    
+    def get_symbols_from_mt5_light():
+        """Retrieve all available symbols from MT5."""
+        symbols = mt5.symbols_get()
+        if not symbols:
+            return []
+        return [s.name for s in symbols]
+    
+    def get_spread_data_light(symbol, lookback_minutes=60):
+        """
+        Fetch spread data efficiently - returns history and current spread in one go.
+        """
+        lagos_tz = pytz.timezone('Africa/Lagos')
+        
+        # Ensure symbol is selected
+        for attempt in range(3):
+            if mt5.symbol_select(symbol, True):
+                break
+            time.sleep(0.2)
+        else:
+            return None, None, None
+        
+        # Fetch M1 data (1-minute timeframe)
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, lookback_minutes)
+        
+        if rates is None or len(rates) == 0:
+            return None, None, None
+        
+        # Get current tick
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return None, None, None
+        
+        # Get symbol info for pip calculation
+        symbol_info = mt5.symbol_info(symbol)
+        points_per_pip = 10 if symbol_info and symbol_info.digits in [3, 5] else 1
+        
+        # Process historical data efficiently
+        minute_records = []
+        max_spread_pips = 0
+        max_spread_minute = None
+        
+        for rate in rates:
+            timestamp = pd.to_datetime(rate['time'], unit='s')
+            spread_points = float(rate['spread'])
+            spread_pips = round(spread_points / points_per_pip, 2)
+            
+            record = {
+                "minute": timestamp.strftime('%Y-%m-%d %H:%M:00'),
+                "spread_points": spread_points,
+                "spread_pips": spread_pips
+            }
+            minute_records.append(record)
+            
+            if spread_pips > max_spread_pips:
+                max_spread_pips = spread_pips
+                max_spread_minute = record
+        
+        # Calculate current spread
+        current_spread_points = float(tick.ask - tick.bid)
+        current_spread_pips = round(current_spread_points / points_per_pip, 2)
+        
+        history_data = {
+            "history": minute_records[-10:],  # Only keep last 10 minutes for faster saving
+            "full_history_length": len(minute_records),
+            "max_spread_in_60min": {
+                "value_pips": max_spread_pips,
+                "occurred_at": max_spread_minute["minute"] if max_spread_minute else None,
+                "spread_pips": max_spread_minute["spread_pips"] if max_spread_minute else None
+            }
+        }
+        
+        current_data = {
+            "current_spread": {
+                "timestamp": datetime.now(lagos_tz).strftime('%Y-%m-%d %H:%M:%S'),
+                "bid": float(tick.bid),
+                "ask": float(tick.ask),
+                "spread_points": current_spread_points,
+                "spread_pips": current_spread_pips
+            }
+        }
+        
+        return history_data, current_data, points_per_pip
+    
+    def save_spread_analysis_light(spread_data, symbol, base_output_dir):
+        """Save spread analysis to JSON file quickly."""
+        filename = f"{symbol}_spread.json"
+        file_path = os.path.join(base_output_dir, filename)
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(spread_data, f, indent=4, default=str)
+            return True
+        except Exception:
+            return False
+    
+    # =========================================================================
+    # MAIN EXECUTION
+    # =========================================================================
+    
+    print(f"  🔍 Quick spread check for investor: {inv_id}")
+    
+    # Load configuration
+    investor_users = load_investor_users_light()
+    investor_cfg = investor_users.get(inv_id)
+    
+    if not investor_cfg:
+        print(f"    ✗ Investor config not found")
+        return False, {"error": "Investor config not found"}, False
+    
+    target_folder = investor_cfg.get("TARGET_FOLDER")
+    if not target_folder:
+        print(f"    ✗ No TARGET_FOLDER found")
+        return False, {"error": "No TARGET_FOLDER found"}, False
+    
+    # Load symbols
+    symbol_list = load_symbols_light(inv_id)
+    if not symbol_list:
+        print(f"    ✗ No symbols found")
+        return False, {"error": "No symbols found"}, False
+    
+    # Create output directory
+    base_output_dir = os.path.join(INV_PATH, inv_id, target_folder)
+    os.makedirs(base_output_dir, exist_ok=True)
+    
+    # Validate symbols against MT5
+    mt5_symbols = get_symbols_from_mt5_light()
+    valid_symbols = [sym for sym in symbol_list if sym in mt5_symbols]
+    
+    if not valid_symbols:
+        print(f"    ✗ No valid symbols on MT5")
+        return False, {"error": "No valid symbols on MT5"}, False
+    
+    print(f"    📊 Checking {len(valid_symbols)} symbols...")
+    
+    alerts = []
+    symbols_checked = 0
+    symbols_with_warnings = 0
+    
+    for symbol in valid_symbols:
+        # Get spread data
+        history_data, current_data, _ = get_spread_data_light(symbol, LOOKBACK_MINUTES)
+        
+        if not history_data or not current_data:
+            print(f"      ⚠️ {symbol} | Failed to fetch data")
+            continue
+        
+        symbols_checked += 1
+        
+        # Extract values
+        max_historical = history_data["max_spread_in_60min"]["value_pips"]
+        current_spread = current_data["current_spread"]["spread_pips"]
+        
+        # Calculate ratio
+        if max_historical > 0:
+            ratio = current_spread / max_historical
+            is_wide = ratio >= SPREAD_WARNING_MULTIPLIER
+        else:
+            ratio = 0
+            is_wide = False
+        
+        # Prepare data for saving
+        spread_analysis = {
+            "symbol": symbol,
+            "investor_id": inv_id,
+            "analysis_timestamp": datetime.now(pytz.timezone('Africa/Lagos')).isoformat(),
+            "lookback_minutes": LOOKBACK_MINUTES,
+            "warning_multiplier": SPREAD_WARNING_MULTIPLIER,
+            "spread_history": history_data,
+            "current_spread": current_data["current_spread"],
+            "analysis": {
+                "is_wide_alert": is_wide,
+                "comparison_ratio": round(ratio, 2),
+                "message": None
+            }
+        }
+        
+        if is_wide:
+            alert_msg = f"⚠️ WIDE: {current_spread} pips vs max {max_historical} pips ({round(ratio, 1)}x)"
+            spread_analysis["analysis"]["message"] = alert_msg
+            alerts.append({
+                "symbol": symbol,
+                "current_spread": current_spread,
+                "max_historical": max_historical,
+                "ratio": round(ratio, 2),
+                "message": alert_msg
+            })
+            symbols_with_warnings += 1
+            print(f"      🚨 {symbol} | {alert_msg}")
+        else:
+            normal_msg = f"✓ Normal: {current_spread} pips vs max {max_historical} pips ({round(ratio, 2)}x)"
+            spread_analysis["analysis"]["message"] = normal_msg
+            print(f"      ✓ {symbol} | {normal_msg}")
+        
+        # Save the analysis
+        save_spread_analysis_light(spread_analysis, symbol, base_output_dir)
+        
+        # Small delay to avoid rate limiting
+        time.sleep(SLEEP_BETWEEN_SYMBOLS)
+    
+    # Update global warning
+    if alerts:
+        SPREAD_WIDE_WARNING = {
+            'is_triggered': True,
+            'investor_id': inv_id,
+            'symbols': [alert['symbol'] for alert in alerts],
+            'timestamp': datetime.now(pytz.timezone('Africa/Lagos')).isoformat(),
+            'details': alerts
+        }
+        print(f"  🚨 WIDE SPREAD DETECTED: {symbols_with_warnings}/{symbols_checked} symbols affected")
+        return True, {
+            "alerts": alerts, 
+            "symbols_checked": symbols_checked,
+            "symbols_with_warnings": symbols_with_warnings
+        }, True
+    else:
+        SPREAD_WIDE_WARNING = {
+            'is_triggered': False,
+            'investor_id': None,
+            'symbols': [],
+            'timestamp': None,
+            'details': {}
+        }
+        print(f"  ✅ No wide spreads detected ({symbols_checked} symbols checked)")
+        return False, {
+            "message": "Spreads normal", 
+            "symbols_checked": symbols_checked
+        }, True
+    
 def fetch_ohlc_data_for_investor(inv_id):
     """
     Fetch OHLCV data and generate charts for a specific investor.
@@ -2609,7 +2924,302 @@ def fetch_ohlc_data_for_investor(inv_id):
         result['errors'].append(str(e))
         return result
 
-def directional_bias(inv_id=None):
+def delete_unauthorized_symbol_files(inv_id):
+    """
+    Delete files for symbols not listed in the investor's accountmanagement.json.
+    Checks and protects only the listed symbols, deletes unlisted symbols' files
+    including JSON, PNG, and spread JSON files for all timeframes.
+    
+    Parameters:
+    - inv_id: The investor ID to process
+    
+    Returns:
+    - dict: Results including deleted files, protected files, and errors
+    """
+    
+    # =========================================================================
+    # CONSTANTS
+    # =========================================================================
+    DELETE_SLEEP_BETWEEN_FILES = 0.05  # Small delay between deletions
+    
+    # =========================================================================
+    # HELPER FUNCTIONS
+    # =========================================================================
+    
+    def load_investor_users():
+        """Load investor users config from JSON file."""
+        INVESTOR_USERS_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\demo_investors.json"
+        
+        if not os.path.exists(INVESTOR_USERS_PATH):
+            return {}
+        
+        try:
+            with open(INVESTOR_USERS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Extract target folder from INVESTED_WITH
+            for investor_id, cfg in data.items():
+                if "INVESTED_WITH" in cfg:
+                    invested_with = cfg["INVESTED_WITH"]
+                    if "_" in invested_with:
+                        target_folder = invested_with.split("_", 1)[1]
+                        cfg["TARGET_FOLDER"] = target_folder
+                    else:
+                        cfg["TARGET_FOLDER"] = invested_with
+            
+            return data
+        except Exception:
+            return {}
+    
+    def load_investor_symbols_and_timeframes(investor_id):
+        """
+        Load symbols and timeframes from accountmanagement.json.
+        Returns tuple: (symbols_list, timeframes_list)
+        """
+        accountmanagement_path = os.path.join(INV_PATH, investor_id, "accountmanagement.json")
+        
+        if not os.path.exists(accountmanagement_path):
+            print(f"  ⚠️  Investor {investor_id} | accountmanagement.json not found")
+            return [], []
+        
+        try:
+            with open(accountmanagement_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Extract symbols from symbols_dictionary
+            symbols_dict = data.get("symbols_dictionary", {})
+            symbols = []
+            
+            if symbols_dict:
+                for category, symbol_list in symbols_dict.items():
+                    if isinstance(symbol_list, list):
+                        symbols.extend(symbol_list)
+                    elif isinstance(symbol_list, str):
+                        symbols.append(symbol_list)
+            
+            # Remove duplicates while preserving order
+            unique_symbols = []
+            seen = set()
+            for symbol in symbols:
+                if symbol not in seen:
+                    unique_symbols.append(symbol)
+                    seen.add(symbol)
+            
+            # Extract timeframes
+            timeframes = data.get("timeframe", [])
+            if isinstance(timeframes, str):
+                timeframes = [timeframes]
+            elif not isinstance(timeframes, list):
+                timeframes = []
+            
+            print(f"  📊  Investor {investor_id} | Loaded {len(unique_symbols)} symbols, {len(timeframes)} timeframes")
+            return unique_symbols, timeframes
+            
+        except Exception as e:
+            print(f"  ⚠️  Investor {investor_id} | Failed to load config: {str(e)}")
+            return [], []
+    
+    def get_target_folder(investor_id, investor_users):
+        """Get target folder for the investor."""
+        investor_cfg = investor_users.get(investor_id)
+        if not investor_cfg:
+            return None
+        
+        return investor_cfg.get("TARGET_FOLDER")
+    
+    def is_protected_file(filename, protected_symbols, timeframes):
+        """
+        Check if a file should be protected (kept) based on symbols and timeframes.
+        
+        File patterns to protect:
+        - {symbol}_{timeframe}_candledetails.json
+        - {symbol}_{timeframe}_chart.png
+        - {symbol}_spread.json
+        
+        Returns: (is_protected, symbol, file_type)
+        """
+        # Pattern 1: {symbol}_spread.json
+        if filename.endswith('_spread.json'):
+            symbol = filename.replace('_spread.json', '')
+            if symbol in protected_symbols:
+                return True, symbol, 'spread_json'
+            return False, symbol, 'spread_json'
+        
+        # Pattern 2: {symbol}_{timeframe}_candledetails.json
+        if filename.endswith('_candledetails.json'):
+            # Remove suffix
+            base = filename.replace('_candledetails.json', '')
+            # Split by underscore to separate symbol and timeframe
+            parts = base.rsplit('_', 1)
+            if len(parts) == 2:
+                symbol, timeframe = parts
+                if symbol in protected_symbols and timeframe in timeframes:
+                    return True, symbol, 'candledetails_json'
+            return False, base.split('_')[0] if '_' in base else base, 'candledetails_json'
+        
+        # Pattern 3: {symbol}_{timeframe}_chart.png
+        if filename.endswith('_chart.png'):
+            # Remove suffix
+            base = filename.replace('_chart.png', '')
+            # Split by underscore to separate symbol and timeframe
+            parts = base.rsplit('_', 1)
+            if len(parts) == 2:
+                symbol, timeframe = parts
+                if symbol in protected_symbols and timeframe in timeframes:
+                    return True, symbol, 'chart_png'
+            return False, base.split('_')[0] if '_' in base else base, 'chart_png'
+        
+        # Not a recognized file pattern - don't touch
+        return True, None, 'unknown'
+    
+    def delete_file(file_path, filename):
+        """Delete a file and return success status."""
+        try:
+            os.remove(file_path)
+            print(f"      🗑️  DELETED: {filename}")
+            return True
+        except Exception as e:
+            print(f"       Failed to delete {filename}: {str(e)[:100]}")
+            return False
+    
+    # =========================================================================
+    # MAIN EXECUTION
+    # =========================================================================
+    
+    print(f"\n{'='*80}")
+    print(f"🗑️  CLEANING UNAUTHORIZED SYMBOL FILES FOR INVESTOR: {inv_id}")
+    print(f"{'='*80}")
+    
+    result = {
+        'investor_id': inv_id,
+        'success': False,
+        'protected_files': [],
+        'deleted_files': [],
+        'errors': [],
+        'total_files_found': 0,
+        'output_directory': None
+    }
+    
+    try:
+        # Step 1: Load investor configuration
+        investor_users = load_investor_users()
+        if not investor_users:
+            result['errors'].append("Failed to load investor users config")
+            return result
+        
+        # Step 2: Get target folder
+        target_folder = get_target_folder(inv_id, investor_users)
+        if not target_folder:
+            print(f"  ✗ Investor {inv_id} | No TARGET_FOLDER found")
+            result['errors'].append("No TARGET_FOLDER found")
+            return result
+        
+        # Step 3: Load authorized symbols and timeframes from accountmanagement.json
+        authorized_symbols, authorized_timeframes = load_investor_symbols_and_timeframes(inv_id)
+        
+        if not authorized_symbols:
+            print(f"  ⚠️  Investor {inv_id} | No authorized symbols found - will delete ALL symbol files!")
+        
+        if not authorized_timeframes:
+            print(f"  ⚠️  Investor {inv_id} | No authorized timeframes found - will keep NO timeframe files!")
+        
+        # Step 4: Build output directory path
+        output_dir = os.path.join(INV_PATH, inv_id, target_folder)
+        
+        if not os.path.exists(output_dir):
+            print(f"  ⚠️  Investor {inv_id} | Output directory does not exist: {output_dir}")
+            result['success'] = True  # Nothing to delete is considered success
+            result['output_directory'] = output_dir
+            return result
+        
+        result['output_directory'] = output_dir
+        
+        # Step 5: Scan directory for symbol files
+        all_files = os.listdir(output_dir)
+        
+        # Filter for relevant files (JSON and PNG that match our patterns)
+        relevant_files = []
+        for filename in all_files:
+            if (filename.endswith('_spread.json') or 
+                filename.endswith('_candledetails.json') or 
+                filename.endswith('_chart.png')):
+                relevant_files.append(filename)
+        
+        result['total_files_found'] = len(relevant_files)
+        
+        if not relevant_files:
+            print(f"  ✅ Investor {inv_id} | No symbol files found in {output_dir}")
+            result['success'] = True
+            return result
+        
+        print(f"  📂 Scanning {len(relevant_files)} files in: {output_dir}")
+        print(f"  🛡️  Protected symbols: {authorized_symbols if authorized_symbols else 'NONE'}")
+        print(f"  🛡️  Protected timeframes: {authorized_timeframes if authorized_timeframes else 'NONE'}")
+        print()
+        
+        # Step 6: Process each file
+        protected_set = set(authorized_symbols)
+        timeframe_set = set(authorized_timeframes)
+        
+        for filename in relevant_files:
+            file_path = os.path.join(output_dir, filename)
+            
+            # Check if file should be protected
+            is_protected, symbol, file_type = is_protected_file(
+                filename, 
+                protected_set, 
+                timeframe_set
+            )
+            
+            if is_protected:
+                print(f"      ✅ PROTECTED: {filename} (symbol: {symbol}, type: {file_type})")
+                result['protected_files'].append({
+                    'filename': filename,
+                    'symbol': symbol,
+                    'type': file_type
+                })
+            else:
+                # Delete unauthorized file
+                if delete_file(file_path, filename):
+                    result['deleted_files'].append({
+                        'filename': filename,
+                        'symbol': symbol if symbol else 'unknown',
+                        'type': file_type,
+                        'reason': f"Symbol '{symbol}' not authorized" if symbol not in protected_set else f"Timeframe not authorized"
+                    })
+                else:
+                    result['errors'].append(f"Failed to delete: {filename}")
+                
+                time.sleep(DELETE_SLEEP_BETWEEN_FILES)
+        
+        # Step 7: Summary
+        print(f"\n{'='*80}")
+        print(f"📊 CLEANUP SUMMARY FOR INVESTOR: {inv_id}")
+        print(f"{'='*80}")
+        print(f"  📂 Directory: {output_dir}")
+        print(f"  🛡️  Protected files: {len(result['protected_files'])}")
+        print(f"  🗑️  Deleted files: {len(result['deleted_files'])}")
+        print(f"   Errors: {len(result['errors'])}")
+        
+        if result['deleted_files']:
+            print(f"\n  Deleted files by type:")
+            deleted_by_type = {}
+            for deleted in result['deleted_files']:
+                file_type = deleted['type']
+                deleted_by_type[file_type] = deleted_by_type.get(file_type, 0) + 1
+            for file_type, count in deleted_by_type.items():
+                print(f"    - {file_type}: {count}")
+        
+        result['success'] = True
+        return result
+        
+    except Exception as e:
+        print(f"   Investor {inv_id} | Error in delete_unauthorized_symbol_files: {str(e)}")
+        traceback.print_exc()
+        result['errors'].append(str(e))
+        return result
+    
+def directional_bias_old(inv_id=None):
     """
     Analyze directional bias based on the 2 most recent completed candles.
     Reads candle data from pre-generated JSON files.
@@ -3210,7 +3820,11 @@ def directional_bias(inv_id=None):
                     # Get minimum volume
                     min_volume = get_min_volume()
                     
-                    # Create signal with candle price levels
+                    # Extract candle times
+                    candle_1_time = candle_1.get('time', '')
+                    candle_2_time = candle_2.get('time', '')
+                    
+                    # Create signal with candle price levels and candle times
                     signal = {
                         "symbol": symbol,
                         "timeframe": timeframe,
@@ -3219,10 +3833,12 @@ def directional_bias(inv_id=None):
                         "entry": round(entry_price, digits),
                         "exit": round(exit_price, digits),
                         # Candle 1 (second most recent) details
+                        "candle_1_time": candle_1_time,
                         "candle_1_high": round(candle_1['high'], digits),
                         "candle_1_low": round(candle_1['low'], digits),
                         "candle_1_type": candle_1_type,
                         # Candle 2 (most recent completed) details
+                        "candle_2_time": candle_2_time,
                         "candle_2_high": round(candle_2['high'], digits),
                         "candle_2_low": round(candle_2['low'], digits),
                         "candle_2_type": candle_2_type,
@@ -3249,7 +3865,9 @@ def directional_bias(inv_id=None):
                         print(f"\n  💾 SIGNAL GENERATED: {symbol} [{timeframe}] [{bias_type.upper()}]")
                         print(f"     Order: {order_type} at {round(entry_price, digits)}")
                         print(f"     Exit: {round(exit_price, digits)}")
+                        print(f"     Candle 1 Time: {candle_1_time}")
                         print(f"     Candle 1: {candle_1_type} | High: {round(candle_1['high'], digits)} | Low: {round(candle_1['low'], digits)}")
+                        print(f"     Candle 2 Time: {candle_2_time}")
                         print(f"     Candle 2: {candle_2_type} | High: {round(candle_2['high'], digits)} | Low: {round(candle_2['low'], digits)}")
                         print(f"     Volume: {min_volume}")
                         print(f"     Risk/Reward: {risk_reward}")
@@ -3333,22 +3951,854 @@ def directional_bias(inv_id=None):
     
     return stats
 
+def directional_bias(inv_id=None):
+    """
+    Analyze directional bias based on the 2 most recent completed candles.
+    Reads candle data from pre-generated JSON files.
+    
+    Checks for bullish (both green candles with higher highs/higher lows) or 
+    bearish (both red candles with lower highs/lower lows) patterns.
+    
+    Timeframe is read from accountmanagement.json "timeframe" field (can be string or list).
+    Supported timeframes: 1m, 5m, 15m, 30m, 45m, 1h, 2h, 4h (4h is max)
+    
+    Saves limit orders ONLY to: INV_PATH/{investor_id}/{strategy_name}/pending_orders/limit_orders.json
+    Manages multiple orders per symbol/type: allows 2 orders, deletes oldest when 3rd appears.
+    
+    Args:
+        inv_id: Optional specific investor ID to process
+        
+    Returns:
+        dict: Statistics and signals for directional bias
+    """
+    print(f"\n{'='*10} 🧭  DIRECTIONAL BIAS ANALYSIS {'='*10}")
+    if inv_id:
+        print(f" Processing investor: {inv_id}")
+    
+    # Statistics for this run
+    stats = {
+        "investor_id": inv_id if inv_id else "all",
+        "total_symbols": 0,
+        "successful_symbols": 0,
+        "failed_symbols": 0,
+        "bullish_signals": 0,
+        "bearish_signals": 0,
+        "total_signals": 0,
+        "signals_generated": False,
+        "timeframes_used": [],
+        "skipped_signals": 0,
+        "cancelled_pending_orders": 0
+    }
+    
+    def get_candle_center(candle):
+        """Calculate center price of a candle using HIGH and LOW (not open/close)"""
+        return (candle['high'] + candle['low']) / 2
+    
+    def normalize_symbol_for_filename(raw_symbol):
+        """Remove special characters from symbol for filename"""
+        normalized = raw_symbol.replace('+', '').replace('-', '').replace('.', '')
+        return normalized
+    
+    def load_investor_config(investor_id):
+        """Load investor configuration from accountmanagement.json"""
+        acc_mgmt_path = Path(INV_PATH) / investor_id / "accountmanagement.json"
+        
+        if not acc_mgmt_path.exists():
+            print(f" [{investor_id}]  Account management file not found")
+            return None, None, None, None, None
+        
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            # Get symbols dictionary
+            symbols_dict = config.get("symbols_dictionary", {})
+            if not symbols_dict:
+                print(f" [{investor_id}] ⚠️ No symbols_dictionary found")
+                return None, None, None, None, None
+            
+            # Get timeframe (can be string or list)
+            timeframe_config = config.get("timeframe", "15m")
+            
+            # Convert to list if it's a string
+            if isinstance(timeframe_config, str):
+                timeframes = [timeframe_config]
+            elif isinstance(timeframe_config, list):
+                timeframes = timeframe_config
+            else:
+                print(f" [{investor_id}] ⚠️ Invalid timeframe format: {type(timeframe_config)}")
+                return None, None, None, None, None
+            
+            # Validate timeframes
+            valid_timeframes = []
+            for tf in timeframes:
+                if tf in TIMEFRAME_MAP:
+                    valid_timeframes.append(tf)
+                else:
+                    print(f" [{investor_id}] ⚠️ Unsupported timeframe '{tf}', skipping")
+            
+            if not valid_timeframes:
+                print(f" [{investor_id}]  No valid timeframes provided")
+                return None, None, None, None, None
+            
+            print(f" [{investor_id}] 📊 Using timeframes: {valid_timeframes}")
+            
+            # Get selected risk reward
+            selected_risk_reward = config.get("selected_risk_reward", [1])
+            if isinstance(selected_risk_reward, list) and len(selected_risk_reward) > 0:
+                risk_reward = selected_risk_reward[0]
+            else:
+                risk_reward = 1
+            
+            print(f" [{investor_id}] 📈 Risk/Reward: {risk_reward}")
+            
+            # Get target folder and strategy name from investor config using GLOBAL VERIFIED_INVESTORS
+            target_folder = None
+            strategy_name = None
+            
+            # Use the global VERIFIED_INVESTORS variable
+            if VERIFIED_INVESTORS:
+                try:
+                    with open(VERIFIED_INVESTORS, 'r', encoding='utf-8') as f:
+                        investor_users = json.load(f)
+                    
+                    investor_cfg = investor_users.get(investor_id)
+                    if investor_cfg:
+                        invested_with = investor_cfg.get("INVESTED_WITH", "")
+                        if "_" in invested_with:
+                            target_folder = invested_with.split("_", 1)[1]
+                            strategy_name = target_folder
+                        else:
+                            target_folder = invested_with
+                            strategy_name = invested_with
+                except Exception as e:
+                    print(f" [{investor_id}] ⚠️ Error reading verified investors: {e}")
+            
+            if not target_folder:
+                print(f" [{investor_id}] ⚠️ No TARGET_FOLDER found, using 'prices'")
+                target_folder = "prices"
+                strategy_name = "prices"
+            
+            print(f" [{investor_id}] 📁 Strategy name: {strategy_name}")
+            
+            return symbols_dict, valid_timeframes, target_folder, risk_reward, strategy_name
+            
+        except Exception as e:
+            print(f" [{investor_id}]  Error loading config: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None, None, None, None
+    
+    def load_candle_data(investor_id, symbol, timeframe, target_folder):
+        """Load candle data from pre-generated JSON file"""
+        normalized_symbol = normalize_symbol_for_filename(symbol)
+        
+        filename = f"{normalized_symbol}_{timeframe}_candledetails.json"
+        file_path = Path(INV_PATH) / investor_id / target_folder / filename
+        
+        if not file_path.exists():
+            filename_original = f"{symbol}_{timeframe}_candledetails.json"
+            file_path = Path(INV_PATH) / investor_id / target_folder / filename_original
+            
+            if not file_path.exists():
+                return None, f"File not found: {filename} or {filename_original}"
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                candles = json.load(f)
+            
+            if len(candles) < 3:
+                return None, f"Only {len(candles)} candles available (need at least 3)"
+            
+            current_candle = candles[-1]
+            candle_2 = candles[-2]
+            candle_1 = candles[-3]
+            
+            return {
+                'current': current_candle,
+                'candle_2': candle_2,
+                'candle_1': candle_1
+            }, None
+            
+        except Exception as e:
+            return None, f"Error reading {filename}: {e}"
+    
+    def print_candle_details(symbol, timeframe, candle_data, digits):
+        """Print detailed candle information"""
+        current = candle_data['current']
+        candle_2 = candle_data['candle_2']
+        candle_1 = candle_data['candle_1']
+        
+        print(f"\n  📊 {symbol} [{timeframe}]")
+        print(f"  ┌{'─' * 65}")
+        print(f"  │ 🔄 CURRENT FORMING CANDLE:")
+        print(f"  │    Time: {current.get('time', 'N/A')}")
+        print(f"  │    Open: {current.get('open', 0):.{digits}f}")
+        print(f"  │    High: {current.get('high', 0):.{digits}f}")
+        print(f"  │    Low:  {current.get('low', 0):.{digits}f}")
+        print(f"  │    Close:{current.get('close', 0):.{digits}f}")
+        print(f"  │")
+        
+        candle_type = "🟢 BULLISH" if candle_2['close'] > candle_2['open'] else "🔴 BEARISH"
+        print(f"  │ ✅ CANDLE 2 (Most Recent Completed): {candle_type}")
+        print(f"  │    Time: {candle_2.get('time', 'N/A')}")
+        print(f"  │    Open: {candle_2['open']:.{digits}f}")
+        print(f"  │    High: {candle_2['high']:.{digits}f}")
+        print(f"  │    Low:  {candle_2['low']:.{digits}f}")
+        print(f"  │    Close:{candle_2['close']:.{digits}f}")
+        print(f"  │")
+        
+        candle_type = "🟢 BULLISH" if candle_1['close'] > candle_1['open'] else "🔴 BEARISH"
+        print(f"  │ 📊 CANDLE 1 (Second Most Recent): {candle_type}")
+        print(f"  │    Time: {candle_1.get('time', 'N/A')}")
+        print(f"  │    Open: {candle_1['open']:.{digits}f}")
+        print(f"  │    High: {candle_1['high']:.{digits}f}")
+        print(f"  │    Low:  {candle_1['low']:.{digits}f}")
+        print(f"  │    Close:{candle_1['close']:.{digits}f}")
+        print(f"  └{'─' * 65}")
+    
+    def calculate_exit_price(bias_type, candle_data, digits):
+        """
+        Calculate exit price based on bias type and current forming candle
+        
+        For bullish: 
+          - Default exit: high price of candle 2
+          - If current candle's high > candle 2 high, use current candle's high instead
+        
+        For bearish:
+          - Default exit: low price of candle 2
+          - If current candle's low < candle 2 low, use current candle's low instead
+        """
+        candle_2 = candle_data['candle_2']
+        current_candle = candle_data['current']
+        
+        if bias_type == 'bullish':
+            exit_price = candle_2['high']
+            if current_candle['high'] > candle_2['high']:
+                exit_price = current_candle['high']
+                print(f"     📈 Exit updated: Current candle high ({current_candle['high']:.{digits}f}) > Candle 2 high ({candle_2['high']:.{digits}f})")
+            else:
+                print(f"     📈 Exit (Candle 2 high): {exit_price:.{digits}f}")
+        else:
+            exit_price = candle_2['low']
+            if current_candle['low'] < candle_2['low']:
+                exit_price = current_candle['low']
+                print(f"     📉 Exit updated: Current candle low ({current_candle['low']:.{digits}f}) < Candle 2 low ({candle_2['low']:.{digits}f})")
+            else:
+                print(f"     📉 Exit (Candle 2 low): {exit_price:.{digits}f}")
+        
+        return exit_price
+    
+    def manage_existing_orders(investor_root, symbol, order_type, new_signal_time):
+        """
+        Manage existing pending orders for a specific symbol with matching order type.
+        NEW LOGIC:
+        - Allows up to 2 orders of the same type
+        - If 3rd order appears, delete the OLDEST (earliest timestamp) from MT5 and local storage
+        - Returns: (cancelled_count, orders_to_keep, is_first_order, is_second_order)
+        """
+        cancelled_count = 0
+        orders_to_keep = []
+        is_first_order = False
+        is_second_order = False
+        
+        try:
+            # Ensure MT5 is initialized
+            if not mt5.terminal_info():
+                if not mt5.initialize():
+                    print(f"     ⚠️ Failed to initialize MT5, skipping order management")
+                    return 0, [], False, False
+            
+            # Get all pending orders
+            pending_orders = mt5.orders_get()
+            if not pending_orders:
+                print(f"     📭 No existing pending orders found")
+                is_first_order = True  # This will be the first order
+                return 0, [], is_first_order, is_second_order
+            
+            # Collect matching orders with their timestamps
+            matching_orders = []
+            for order in pending_orders:
+                order_symbol = order.symbol
+                order_type_int = order.type
+                
+                # Map MT5 order type to string
+                order_type_str = None
+                if order_type_int == mt5.ORDER_TYPE_BUY_STOP:
+                    order_type_str = "buy_stop"
+                elif order_type_int == mt5.ORDER_TYPE_SELL_STOP:
+                    order_type_str = "sell_stop"
+                else:
+                    continue
+                
+                # Check if symbol matches
+                normalized_order_symbol = normalize_symbol_for_filename(order_symbol)
+                normalized_target_symbol = normalize_symbol_for_filename(symbol)
+                
+                symbol_matches = (order_symbol == symbol or normalized_order_symbol == normalized_target_symbol)
+                
+                if symbol_matches and order_type_str == order_type:
+                    # Get order time (using creation time if available, otherwise current time)
+                    order_time = getattr(order, 'time_setup', None) or getattr(order, 'time_done', None) or order.time_expiration
+                    matching_orders.append({
+                        'ticket': order.ticket,
+                        'price': order.price_open,
+                        'time': order_time,
+                        'order_obj': order
+                    })
+            
+            # Sort by time (oldest first)
+            matching_orders.sort(key=lambda x: x['time'] if x['time'] else 0)
+            
+            order_count = len(matching_orders)
+            print(f"     📊 Found {order_count} existing {order_type} orders for {symbol}")
+            
+            # Determine order flags based on count
+            if order_count == 0:
+                is_first_order = True
+                print(f"     🆕 No existing orders - this will be the FIRST order")
+                return 0, [], is_first_order, is_second_order
+            elif order_count == 1:
+                is_second_order = True
+                print(f"     📌 One existing order - this will be the SECOND order")
+                orders_to_keep = matching_orders  # Keep the existing one
+                return 0, orders_to_keep, is_first_order, is_second_order
+            elif order_count == 2:
+                # We have 2 orders already, need to delete the oldest (first) to make room for new one
+                oldest_order = matching_orders[0]  # Oldest
+                newest_existing = matching_orders[1]  # Newest existing
+                
+                print(f"     ⚠️ Already have 2 orders. Deleting OLDEST order from {datetime.fromtimestamp(oldest_order['time']).strftime('%Y-%m-%d %H:%M:%S') if oldest_order['time'] else 'unknown time'}")
+                print(f"     📌 Keeping NEWEST order from {datetime.fromtimestamp(newest_existing['time']).strftime('%Y-%m-%d %H:%M:%S') if newest_existing['time'] else 'unknown time'}")
+                
+                # Delete the oldest order from MT5
+                delete_request = {
+                    "action": mt5.TRADE_ACTION_REMOVE,
+                    "order": oldest_order['ticket'],
+                }
+                
+                result = mt5.order_send(delete_request)
+                
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    print(f"     ✅ DELETED oldest pending order: #{oldest_order['ticket']} ({symbol}) {order_type} @ {oldest_order['price']}")
+                    cancelled_count += 1
+                    # Keep the newest existing order
+                    orders_to_keep = [newest_existing]
+                    is_second_order = True  # New order will be second
+                else:
+                    error_msg = result.comment if result else f"Error code: {result.retcode if result else 'Unknown'}"
+                    print(f"     ⚠️ Could not delete oldest order #{oldest_order['ticket']}: {error_msg}")
+                    # If deletion fails, keep both and don't add new order
+                    orders_to_keep = matching_orders
+                    is_second_order = False
+                
+                return cancelled_count, orders_to_keep, is_first_order, is_second_order
+            else:
+                # More than 2 orders (unusual), delete all but the newest one
+                print(f"     ⚠️ Found {order_count} orders (more than expected). Cleaning up...")
+                orders_to_keep_temp = []
+                for idx, order_info in enumerate(matching_orders):
+                    if idx == order_count - 1:  # Keep the newest
+                        orders_to_keep_temp.append(order_info)
+                    else:
+                        # Delete older orders
+                        delete_request = {
+                            "action": mt5.TRADE_ACTION_REMOVE,
+                            "order": order_info['ticket'],
+                        }
+                        result = mt5.order_send(delete_request)
+                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                            print(f"     ✅ DELETED order: #{order_info['ticket']}")
+                            cancelled_count += 1
+                
+                orders_to_keep = orders_to_keep_temp
+                if len(orders_to_keep) == 0:
+                    is_first_order = True
+                elif len(orders_to_keep) == 1:
+                    is_second_order = True
+                
+                return cancelled_count, orders_to_keep, is_first_order, is_second_order
+            
+        except Exception as e:
+            print(f"     ⚠️ Error managing pending orders: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0, [], False, False
+    
+    def is_candle_time_already_recorded(records_file, symbol, timeframe, current_candle_time):
+        """Check if the current forming candle time is already recorded"""
+        if not records_file.exists():
+            return False
+        
+        try:
+            with open(records_file, 'r', encoding='utf-8') as f:
+                records = json.load(f)
+            
+            for record in records:
+                if (record.get('symbol') == symbol and 
+                    record.get('timeframe') == timeframe and 
+                    record.get('current_candle_time') == current_candle_time):
+                    return True
+            return False
+        except Exception as e:
+            print(f"     ⚠️ Error reading records file: {e}")
+            return False
+    
+    def save_candle_time_record(records_file, symbol, timeframe, current_candle_time, signal_info, candle_data, digits, order_flags):
+        """
+        Save the current forming candle time record after generating a signal.
+        Also saves candle_1 and candle_2 details with their tags and order flags.
+        """
+        try:
+            if records_file.exists():
+                with open(records_file, 'r', encoding='utf-8') as f:
+                    records = json.load(f)
+            else:
+                records = []
+            
+            # Extract candle data
+            candle_1 = candle_data['candle_1']
+            candle_2 = candle_data['candle_2']
+            current_candle = candle_data['current']
+            
+            new_record = {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "current_candle_time": current_candle_time,
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "signal_type": signal_info.get('order_type'),
+                "entry_price": signal_info.get('entry'),
+                "exit_price": signal_info.get('exit'),
+                # Order management flags
+                "order_flags": order_flags,
+                # Current forming candle details
+                "current_candle": {
+                    "time": current_candle.get('time', ''),
+                    "open": round(current_candle['open'], digits),
+                    "high": round(current_candle['high'], digits),
+                    "low": round(current_candle['low'], digits),
+                    "close": round(current_candle['close'], digits)
+                },
+                # Candle 1 (second most recent) details
+                "candle_1": {
+                    "time": candle_1.get('time', ''),
+                    "open": round(candle_1['open'], digits),
+                    "high": round(candle_1['high'], digits),
+                    "low": round(candle_1['low'], digits),
+                    "close": round(candle_1['close'], digits),
+                    "type": "bullish" if candle_1['close'] > candle_1['open'] else "bearish"
+                },
+                # Candle 2 (most recent completed) details
+                "candle_2": {
+                    "time": candle_2.get('time', ''),
+                    "open": round(candle_2['open'], digits),
+                    "high": round(candle_2['high'], digits),
+                    "low": round(candle_2['low'], digits),
+                    "close": round(candle_2['close'], digits),
+                    "type": "bullish" if candle_2['close'] > candle_2['open'] else "bearish"
+                }
+            }
+            
+            records.append(new_record)
+            
+            with open(records_file, 'w', encoding='utf-8') as f:
+                json.dump(records, f, indent=4)
+            
+            print(f"     📝 Recorded candle time: {current_candle_time}")
+            print(f"     📝 Recorded candle_1 and candle_2 details")
+            print(f"     🏷️ Order flags: {order_flags}")
+            return True
+        except Exception as e:
+            print(f"     ⚠️ Error saving candle time record: {e}")
+            return False
+    
+    def analyze_directional_bias(candle_data, symbol, digits):
+        """Analyze directional bias based on the 2 most recent completed candles"""
+        candle_1 = candle_data['candle_1']
+        candle_2 = candle_data['candle_2']
+        
+        # Check for bullish pattern
+        candle_2_bullish = candle_2['close'] > candle_2['open']
+        candle_1_bullish = candle_1['close'] > candle_1['open']
+        
+        print(f"\n  🔍 PATTERN CHECK:")
+        print(f"     Candle 2 Bullish: {candle_2_bullish} (Close: {candle_2['close']:.{digits}f} > Open: {candle_2['open']:.{digits}f})")
+        print(f"     Candle 1 Bullish: {candle_1_bullish} (Close: {candle_1['close']:.{digits}f} > Open: {candle_1['open']:.{digits}f})")
+        
+        if candle_2_bullish and candle_1_bullish:
+            print(f"     Both candles are bullish, checking higher highs/lows...")
+            print(f"     Candle 2 High: {candle_2['high']:.{digits}f} > Candle 1 High: {candle_1['high']:.{digits}f}: {candle_2['high'] > candle_1['high']}")
+            print(f"     Candle 2 Low: {candle_2['low']:.{digits}f} > Candle 1 Low: {candle_1['low']:.{digits}f}: {candle_2['low'] > candle_1['low']}")
+            
+            if candle_2['high'] > candle_1['high'] and candle_2['low'] > candle_1['low']:
+                entry_price = get_candle_center(candle_1)
+                exit_price = calculate_exit_price('bullish', candle_data, digits)
+                
+                print(f"\n  ✅ BULLISH PATTERN DETECTED")
+                print(f"     • Entry (Candle 1 Center): {entry_price:.{digits}f}")
+                print(f"     • Exit: {exit_price:.{digits}f}")
+                print(f"     • Order Type: sell_stop")
+                
+                # Get candle types
+                candle_1_type = "bullish" if candle_1['close'] > candle_1['open'] else "bearish"
+                candle_2_type = "bullish" if candle_2['close'] > candle_2['open'] else "bearish"
+                
+                return 'bullish', entry_price, exit_price, candle_1, candle_2, candle_1_type, candle_2_type
+            else:
+                print(f"      Failed higher highs/lows condition")
+        
+        # Check for bearish pattern
+        candle_2_bearish = candle_2['close'] < candle_2['open']
+        candle_1_bearish = candle_1['close'] < candle_1['open']
+        
+        print(f"     Candle 2 Bearish: {candle_2_bearish} (Close: {candle_2['close']:.{digits}f} < Open: {candle_2['open']:.{digits}f})")
+        print(f"     Candle 1 Bearish: {candle_1_bearish} (Close: {candle_1['close']:.{digits}f} < Open: {candle_1['open']:.{digits}f})")
+        
+        if candle_2_bearish and candle_1_bearish:
+            print(f"     Both candles are bearish, checking lower highs/lows...")
+            print(f"     Candle 2 Low: {candle_2['low']:.{digits}f} < Candle 1 Low: {candle_1['low']:.{digits}f}: {candle_2['low'] < candle_1['low']}")
+            print(f"     Candle 2 High: {candle_2['high']:.{digits}f} < Candle 1 High: {candle_1['high']:.{digits}f}: {candle_2['high'] < candle_1['high']}")
+            
+            if candle_2['low'] < candle_1['low'] and candle_2['high'] < candle_1['high']:
+                entry_price = get_candle_center(candle_1)
+                exit_price = calculate_exit_price('bearish', candle_data, digits)
+                
+                print(f"\n  ✅ BEARISH PATTERN DETECTED")
+                print(f"     • Entry (Candle 1 Center): {entry_price:.{digits}f}")
+                print(f"     • Exit: {exit_price:.{digits}f}")
+                print(f"     • Order Type: buy_stop")
+                
+                # Get candle types
+                candle_1_type = "bullish" if candle_1['close'] > candle_1['open'] else "bearish"
+                candle_2_type = "bullish" if candle_2['close'] > candle_2['open'] else "bearish"
+                
+                return 'bearish', entry_price, exit_price, candle_1, candle_2, candle_1_type, candle_2_type
+            else:
+                print(f"      Failed lower highs/lows condition")
+        
+        print(f"\n   NO PATTERN DETECTED")
+        return None, None, None, None, None, None, None
+    
+    def save_directional_signals(strategy_path, new_signals, strategy_name, investor_id):
+        """
+        Save directional bias signals to limit_orders.json file.
+        OVERWRITES the file completely with only the new signals.
+        """
+        pending_orders_dir = strategy_path / "pending_orders"
+        pending_orders_dir.mkdir(exist_ok=True)
+        
+        signals_file = pending_orders_dir / "limit_orders.json"
+        
+        # Overwrite with fresh signals
+        with open(signals_file, 'w', encoding='utf-8') as f:
+            json.dump(new_signals, f, indent=4)
+        
+        # Count order types by symbol
+        symbol_stats = {}
+        for signal in new_signals:
+            sym = signal.get('symbol')
+            order_type = signal.get('order_type')
+            if sym not in symbol_stats:
+                symbol_stats[sym] = {'buy_stop': 0, 'sell_stop': 0}
+            symbol_stats[sym][order_type] = symbol_stats[sym].get(order_type, 0) + 1
+        
+        print(f"\n  💾 Signals saved to: {signals_file}")
+        if symbol_stats:
+            print(f"     📊 Per-symbol order counts:")
+            for sym, counts in symbol_stats.items():
+                print(f"        • {sym}: Buy Stop: {counts.get('buy_stop', 0)}, Sell Stop: {counts.get('sell_stop', 0)}")
+        print(f"     📊 Total signals saved: {len(new_signals)}")
+        
+        return signals_file
+    
+    def get_min_volume(symbol_info=None):
+        """Get minimum volume for symbol"""
+        return 0.01
+    
+    # Main execution
+    if inv_id:
+        # Load investor configuration
+        symbols_dict, timeframes, target_folder, risk_reward, strategy_name = load_investor_config(inv_id)
+        
+        if not symbols_dict or not timeframes:
+            print(f" [{inv_id}]  Failed to load configuration")
+            return stats
+        
+        print(f"\n  ⏰ Timeframes: {timeframes}")
+        print(f"  📁 Target folder: {target_folder}")
+        print(f"  📁 Strategy name: {strategy_name}")
+        print(f"  📈 Risk/Reward: {risk_reward}")
+        
+        # Initialize MT5 for order management
+        if not mt5.terminal_info():
+            print(f" [{inv_id}] Initializing MT5 connection...")
+            if not mt5.initialize():
+                print(f" [{inv_id}] ⚠️ Failed to initialize MT5, order management disabled")
+        
+        # Strategy base directory
+        strategy_base_dir = Path(INV_PATH) / inv_id / strategy_name
+        
+        # Create records directory
+        records_dir = strategy_base_dir / "pending_orders"
+        records_dir.mkdir(exist_ok=True)
+        records_file = records_dir / "candle_time_records.json"
+        
+        total_symbols = 0
+        successful_symbols = 0
+        failed_symbols = 0
+        skipped_signals = 0
+        all_signals = []
+        total_cancelled = 0
+        
+        # Process each timeframe
+        for timeframe in timeframes:
+            print(f"\n{'='*50}")
+            print(f"  Processing timeframe: {timeframe}")
+            print(f"{'='*50}")
+            
+            timeframe_bullish = 0
+            timeframe_bearish = 0
+            timeframe_signals = []
+            timeframe_symbols_processed = 0
+            
+            # Process each symbol
+            for category, symbols in symbols_dict.items():
+                for raw_symbol in symbols:
+                    if not raw_symbol:
+                        continue
+                    
+                    symbol = raw_symbol.upper()
+                    
+                    # Load candle data
+                    candle_data, error = load_candle_data(inv_id, symbol, timeframe, target_folder)
+                    
+                    if candle_data is None:
+                        print(f"\n   {symbol} [{timeframe}]: {error}")
+                        failed_symbols += 1
+                        continue
+                    
+                    # Get current forming candle time
+                    current_candle_time = candle_data['current'].get('time', '')
+                    
+                    # Check for duplicate
+                    if is_candle_time_already_recorded(records_file, symbol, timeframe, current_candle_time):
+                        print(f"\n  ⏭️ SKIPPING {symbol} [{timeframe}]: Signal already generated for candle: {current_candle_time}")
+                        skipped_signals += 1
+                        stats["skipped_signals"] += 1
+                        continue
+                    
+                    # Determine digits for rounding
+                    test_price = candle_data['candle_1']['close']
+                    if test_price < 1:
+                        digits = 5
+                    else:
+                        str_price = f"{test_price:.10f}".rstrip('0')
+                        if '.' in str_price:
+                            digits = len(str_price.split('.')[1])
+                        else:
+                            digits = 2
+                    
+                    # Print candle details
+                    print_candle_details(symbol, timeframe, candle_data, digits)
+                    
+                    # Analyze directional bias
+                    bias_type, entry_price, exit_price, candle_1, candle_2, candle_1_type, candle_2_type = analyze_directional_bias(candle_data, symbol, digits)
+                    
+                    if bias_type is None:
+                        failed_symbols += 1
+                        continue
+                    
+                    # Set order type
+                    if bias_type == 'bullish':
+                        order_type = "sell_stop"
+                        timeframe_bullish += 1
+                    else:
+                        order_type = "buy_stop"
+                        timeframe_bearish += 1
+                    
+                    # MANAGE existing orders (allow up to 2, delete oldest if 3rd appears)
+                    print(f"\n  🔄 Managing existing {order_type} orders for {symbol}...")
+                    current_time = datetime.now().timestamp()
+                    cancelled, orders_to_keep, is_first_order, is_second_order = manage_existing_orders(
+                        Path(INV_PATH) / inv_id, symbol, order_type, current_time
+                    )
+                    
+                    if cancelled > 0:
+                        total_cancelled += cancelled
+                        stats["cancelled_pending_orders"] += cancelled
+                    
+                    # Build order flags
+                    order_flags = {}
+                    if is_first_order:
+                        order_flags["unique_order_type"] = True
+                        print(f"     🏷️ This is the FIRST/UNIQUE {order_type} order")
+                    elif is_second_order:
+                        if order_type == "buy_stop":
+                            order_flags["buy_stop_order_2"] = True
+                            print(f"     🏷️ This is the SECOND buy_stop order")
+                        else:
+                            order_flags["sell_stop_order_2"] = True
+                            print(f"     🏷️ This is the SECOND sell_stop order")
+                        order_flags[f"{order_type}_latest_order_1"] = True
+                        print(f"     🏷️ This is the LATEST {order_type} order")
+                    else:
+                        # This shouldn't happen with new logic, but as fallback
+                        order_flags["unique_order_type"] = True
+                        print(f"     🏷️ This is a UNIQUE order (fallback)")
+                    
+                    # Get minimum volume
+                    min_volume = get_min_volume()
+                    
+                    # Extract candle times
+                    candle_1_time = candle_1.get('time', '')
+                    candle_2_time = candle_2.get('time', '')
+                    
+                    # Create signal with candle price levels, candle times, and order flags
+                    signal = {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "risk_reward": risk_reward,
+                        "order_type": order_type,
+                        "entry": round(entry_price, digits),
+                        "exit": round(exit_price, digits),
+                        # Order management flags
+                        "order_flags": order_flags,
+                        # Candle 1 (second most recent) details
+                        "candle_1_time": candle_1_time,
+                        "candle_1_high": round(candle_1['high'], digits),
+                        "candle_1_low": round(candle_1['low'], digits),
+                        "candle_1_type": candle_1_type,
+                        # Candle 2 (most recent completed) details
+                        "candle_2_time": candle_2_time,
+                        "candle_2_high": round(candle_2['high'], digits),
+                        "candle_2_low": round(candle_2['low'], digits),
+                        "candle_2_type": candle_2_type,
+                        "volume": min_volume,
+                        "current_candle_time": current_candle_time,
+                        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "strategy": strategy_name
+                    }
+                    
+                    # Save candle time record with full candle details and order flags
+                    signal_info = {
+                        'order_type': order_type,
+                        'entry': round(entry_price, digits),
+                        'exit': round(exit_price, digits)
+                    }
+                    
+                    if save_candle_time_record(records_file, symbol, timeframe, current_candle_time, signal_info, candle_data, digits, order_flags):
+                        timeframe_signals.append(signal)
+                        all_signals.append(signal)
+                        timeframe_symbols_processed += 1
+                        successful_symbols += 1
+                        total_symbols += 1
+                        
+                        print(f"\n  💾 SIGNAL GENERATED: {symbol} [{timeframe}] [{bias_type.upper()}]")
+                        print(f"     Order: {order_type} at {round(entry_price, digits)}")
+                        print(f"     Exit: {round(exit_price, digits)}")
+                        print(f"     Order Flags: {order_flags}")
+                        print(f"     Candle 1 Time: {candle_1_time}")
+                        print(f"     Candle 1: {candle_1_type} | High: {round(candle_1['high'], digits)} | Low: {round(candle_1['low'], digits)}")
+                        print(f"     Candle 2 Time: {candle_2_time}")
+                        print(f"     Candle 2: {candle_2_type} | High: {round(candle_2['high'], digits)} | Low: {round(candle_2['low'], digits)}")
+                        print(f"     Volume: {min_volume}")
+                        print(f"     Risk/Reward: {risk_reward}")
+                        print(f"     Strategy: {strategy_name}")
+                    else:
+                        print(f"\n   FAILED to record signal for {symbol} [{timeframe}]")
+                        failed_symbols += 1
+            
+            # Update stats
+            stats["bullish_signals"] += timeframe_bullish
+            stats["bearish_signals"] += timeframe_bearish
+            stats["total_signals"] += len(timeframe_signals)
+            stats["timeframes_used"].append(timeframe)
+            
+            if timeframe_signals:
+                print(f"\n  📊 SUMMARY for {timeframe}:")
+                print(f"     • Symbols processed: {timeframe_symbols_processed}")
+                print(f"     • Bullish signals (sell_stop): {timeframe_bullish}")
+                print(f"     • Bearish signals (buy_stop): {timeframe_bearish}")
+                print(f"     • Total signals: {len(timeframe_signals)}")
+        
+        # Save signals
+        if all_signals:
+            save_directional_signals(strategy_base_dir, all_signals, strategy_name, inv_id)
+            stats["signals_generated"] = True
+        else:
+            # Remove existing file if no signals
+            signals_file = strategy_base_dir / "pending_orders" / "limit_orders.json"
+            if signals_file.exists():
+                signals_file.unlink()
+                print(f"\n  🗑️ No signals generated - removed existing limit_orders.json")
+        
+        # Final summary
+        stats["total_symbols"] = total_symbols
+        stats["successful_symbols"] = successful_symbols
+        stats["failed_symbols"] = failed_symbols
+        
+        print(f"\n{'='*60}")
+        print(f"  📊 FINAL SUMMARY for Investor {inv_id}")
+        print(f"  {'='*60}")
+        print(f"  • Strategy: {strategy_name}")
+        print(f"  • Timeframes processed: {timeframes}")
+        print(f"  • Total symbols: {total_symbols}")
+        print(f"  • Successful: {successful_symbols}")
+        print(f"  • Failed: {failed_symbols}")
+        print(f"  • Skipped (duplicate): {skipped_signals}")
+        print(f"  • Bullish signals (sell_stop): {stats['bullish_signals']}")
+        print(f"  • Bearish signals (buy_stop): {stats['bearish_signals']}")
+        print(f"  • Total signals generated: {stats['total_signals']}")
+        print(f"  • Pending orders cancelled/deleted: {total_cancelled}")
+        print(f"  • Signals saved to: {strategy_base_dir}/pending_orders/limit_orders.json")
+        print(f"  {'='*60}")
+        
+        # Create master summary file
+        if stats["signals_generated"]:
+            master_signals_file = strategy_base_dir / "pending_orders" / "directional_signals_all.json"
+            
+            master_data = {
+                "account_balance": 10000.0,
+                "account_currency": "USD",
+                "strategy": strategy_name,
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timeframes_processed": timeframes,
+                "total_signals": stats['total_signals'],
+                "pending_orders_deleted": total_cancelled,
+                "signals_summary": {
+                    "bullish_sell_stop": stats['bullish_signals'],
+                    "bearish_buy_stop": stats['bearish_signals'],
+                    "skipped_duplicates": skipped_signals
+                },
+                "signals_detail": all_signals
+            }
+            
+            with open(master_signals_file, 'w', encoding='utf-8') as f:
+                json.dump(master_data, f, indent=4)
+            
+            print(f"\n  📁 Master summary saved to: {master_signals_file}")
+            print(f"  📝 Candle time records saved to: {records_file}")
+        else:
+            print(f"\n  ⚠️ No signals generated for user {inv_id}")
+    
+    return stats
+
 def additional_candles_for_orders_limitation(inv_id=None):
     """
     Fetch the 20 most recent candles for each symbol/timeframe combination
-    found in candle_time_records.json and save to additional_candles.json.
+    found in tradeshistory.json (pending orders) and save to additional_candles.json.
     
-    Identifies and flags candle_1 and candle_2 from the original records by TIME only.
+    Identifies and flags candle_1 and candle_2 from the trade records by TIME only.
     Deletes all candles older than candle_1 (candles that come after candle_1 in time),
     keeping only candles from candle_1 to the most recent (newer candles).
     
     If no candle_1 or candle_2 is found for a symbol/timeframe, the entire record is emptied
     and all candles are deleted.
     
-    NEW: Removes orders from limit_orders.json based on additional candles count
+    Removes orders from limit_orders.json based on additional candles count
     configured in accountmanagement.json settings.remove_orders_if_additonal_candles_is_more_than
     
-    NEW: Cancels MT5 pending orders by looking up ticket numbers from tradeshistory.json
+    Cancels MT5 pending orders by looking up ticket numbers from tradeshistory.json
     and cancelling them directly.
     
     Parameters:
@@ -3426,47 +4876,67 @@ def additional_candles_for_orders_limitation(inv_id=None):
         except Exception as e:
             return None, None
     
-    def load_candle_time_records_full(investor_id, strategy_name):
-        """Load existing candle time records"""
-        strategy_base_dir = Path(INV_PATH) / investor_id / strategy_name
-        records_file = strategy_base_dir / "pending_orders" / "candle_time_records.json"
+    def load_tradeshistory_for_candle_reference(investor_id, strategy_name):
+        """
+        Load tradeshistory.json to get symbol/timeframe pairs and candle reference times.
+        Only includes pending orders that have candle_1_time and candle_2_time.
         
-        if not records_file.exists():
+        Returns:
+        - symbol_timeframe_pairs: List of unique symbol/timeframe combinations
+        - candle_reference_data: Dict mapping key to candle_1_time and candle_2_time
+        """
+        investor_root = Path(INV_PATH) / investor_id
+        history_path = investor_root / "tradeshistory.json"
+        
+        if not history_path.exists():
+            print(f"  ℹ️ No tradeshistory.json found for investor {investor_id}")
             return [], {}
         
         try:
-            with open(records_file, 'r', encoding='utf-8') as f:
-                records = json.load(f)
+            with open(history_path, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
             
             symbol_timeframe_pairs = []
             candle_reference_data = {}
             seen = set()
             
-            for record in records:
-                symbol = record.get("symbol")
-                timeframe = record.get("timeframe")
+            for trade in trades:
+                # Only process pending orders that have the required candle times
+                status = trade.get('status', '')
+                if status != 'pending':
+                    continue
                 
-                if symbol and timeframe:
-                    key = f"{symbol}_{timeframe}"
+                symbol = trade.get('symbol_used') or trade.get('symbol')
+                timeframe = trade.get('timeframe')
+                candle_1_time = trade.get('candle_1_time', '')
+                candle_2_time = trade.get('candle_2_time', '')
+                
+                # Skip if missing required data
+                if not symbol or not timeframe or not candle_1_time or not candle_2_time:
+                    continue
+                
+                key = f"{symbol}_{timeframe}"
+                
+                if key not in seen:
+                    symbol_timeframe_pairs.append({
+                        "symbol": symbol,
+                        "timeframe": timeframe
+                    })
+                    seen.add(key)
                     
-                    if key not in seen:
-                        symbol_timeframe_pairs.append({
-                            "symbol": symbol,
-                            "timeframe": timeframe
-                        })
-                        seen.add(key)
-                        
-                        candle_1 = record.get("candle_1", {})
-                        candle_2 = record.get("candle_2", {})
-                        
-                        candle_reference_data[key] = {
-                            "candle_1_time": candle_1.get("time", ""),
-                            "candle_2_time": candle_2.get("time", "")
-                        }
+                    # Store the candle times for this symbol/timeframe
+                    # Note: If multiple trades exist for same symbol/timeframe, 
+                    # we use the first one's candle times (they should be consistent)
+                    candle_reference_data[key] = {
+                        "candle_1_time": candle_1_time,
+                        "candle_2_time": candle_2_time
+                    }
             
+            print(f"  📋 Loaded {len(symbol_timeframe_pairs)} unique symbol/timeframe pairs from tradeshistory.json (pending orders only)")
             return symbol_timeframe_pairs, candle_reference_data
             
         except Exception as e:
+            print(f"  ⚠️ Error loading tradeshistory.json: {e}")
             return [], {}
     
     def fetch_recent_candles_with_matching(symbol, mt5_timeframe, num_candles, reference_data):
@@ -3623,7 +5093,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
         except Exception as e:
             return False
     
-    # NEW SUBFUNCTION: Load tradeshistory and build order lookup map
+    # SUBFUNCTION: Load tradeshistory and build order lookup map
     def load_tradeshistory_lookup(investor_root):
         """
         Load tradeshistory.json and build a lookup map by symbol, order_type, entry, volume.
@@ -3672,7 +5142,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
             print(f"     ⚠️ Error loading tradeshistory.json: {e}")
             return order_lookup
     
-    # NEW SUBFUNCTION: Cancel MT5 pending orders using ticket from tradeshistory
+    # SUBFUNCTION: Cancel MT5 pending orders using ticket from tradeshistory
     def cancel_mt5_pending_orders_by_ticket(orders_to_cancel_info, investor_root):
         """
         Cancel MT5 pending orders by looking up their ticket numbers from tradeshistory.json.
@@ -3741,7 +5211,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
                     cancelled_count += 1
                 else:
                     error_msg = result.comment if result else "Unknown error"
-                    print(f"     ❌ Failed to cancel MT5 order #{ticket}: {error_msg}")
+                    print(f"      Failed to cancel MT5 order #{ticket}: {error_msg}")
             else:
                 print(f"     ℹ️ No pending order found in tradeshistory for: {order_type.upper()} {symbol} @ {entry}")
         
@@ -3753,7 +5223,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
         Check additional_candles count for each symbol/timeframe and remove orders from limit_orders.json
         if additional candles count exceeds the configured threshold.
         
-        NEW: Also cancels MT5 pending orders using ticket lookup from tradeshistory.json.
+        Also cancels MT5 pending orders using ticket lookup from tradeshistory.json.
         
         Parameters:
         - investor_id: The investor ID
@@ -3857,7 +5327,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
             traceback.print_exc()
             return 0, 0
     
-    # NEW SUBFUNCTION: Update tradeshistory.json to mark orders as cancelled
+    # SUBFUNCTION: Update tradeshistory.json to mark orders as cancelled
     def update_tradeshistory_status(investor_root, cancelled_orders_info):
         """
         Update tradeshistory.json to mark cancelled orders as 'cancelled_by_additional_candles'
@@ -3932,9 +5402,11 @@ def additional_candles_for_orders_limitation(inv_id=None):
                 stats["errors"].append("MT5 initialization failed")
                 return stats
         
-        symbol_timeframe_pairs, candle_reference_data = load_candle_time_records_full(inv_id, strategy_name)
+        # REPLACED: Now loading from tradeshistory.json instead of candle_time_records.json
+        symbol_timeframe_pairs, candle_reference_data = load_tradeshistory_for_candle_reference(inv_id, strategy_name)
         
         if not symbol_timeframe_pairs:
+            print(f"  ℹ️ No pending orders with candle reference times found in tradeshistory.json")
             return stats
         
         additional_candles_data = []
@@ -5590,7 +7062,7 @@ def filter_unauthorized_timeframes(inv_id=None):
 def backup_limit_orders(inv_id=None):
     """
     Finds all limit_orders.json files and creates a copy named 
-    limit_orders_backup.json in the same directory.
+    old_limit_orders.json in the same directory.
     
     Args:
         inv_id (str, optional): Specific investor ID to process. 
@@ -5624,13 +7096,13 @@ def backup_limit_orders(inv_id=None):
 
         for source_path in target_files:
             # Define the backup path in the same directory
-            backup_path = source_path.parent / "limit_orders_backup.json"
+            backup_path = source_path.parent / "old_limit_orders.json"
             
             try:
                 # 4. Create the copy (overwrites existing backup)
                 shutil.copy2(source_path, backup_path)
                 
-                print(f"  └─ ✅ Backed up: {source_path.parent.parent.name} -> limit_orders_backup.json")
+                print(f"  └─ ✅ Backed up: {source_path.parent.parent.name} -> old_limit_orders.json")
                 total_backups_created += 1
                 
             except Exception as e:
@@ -8945,14 +10417,14 @@ def martingale(inv_id=None):
     
     return stats
 
-def place_usd_orders(inv_id=None):
+def place_usd_orders_old(inv_id=None):
     """
     Places pending orders from limit_orders.json files for investors.
     
     ENHANCED FEATURES:
     1. Detailed tradeshistory.json with complete order information
     2. Per-order cache to prevent duplicate placement in same run
-    3. Proximity risk check against existing positions
+    3. Proximity risk check against existing positions (configurable via accountmanagement.json)
     4. Order regulation - always cancels unauthorized orders
     5. Dynamic order types: buy_stop, sell_stop, buy_limit, sell_limit, instant_buy, instant_sell
     6. No conversion logic - places exactly what limit_orders.json specifies
@@ -8962,6 +10434,8 @@ def place_usd_orders(inv_id=None):
     10. TRACKING: Running positions get unique IDs and proper status tracking
     11. FULL FIELD PRESERVATION: All fields from limit_orders.json preserved in tradeshistory
     12. FAILURE HANDLING: Removes candle_time_records entry if order placement fails
+    13. CONFIGURABLE PROXIMITY RISK: Reads skip_orders_close_to_position from accountmanagement.json
+    14. INVALID PRICE HANDLING: Converts invalid stop orders to instant market orders when enabled
     """
     
     # --- SUFFIX DICTIONARY FOR RETRY LOGIC ---
@@ -8995,7 +10469,78 @@ def place_usd_orders(inv_id=None):
         ".demo"  # Dot demo
     ]
     
-    # --- SUB-FUNCTION 1: REMOVE CANDLE TIME RECORD ON FAILURE ---
+    # --- SUB-FUNCTION 1: LOAD PROXIMITY RISK SETTING FROM ACCOUNTMANAGEMENT.JSON ---
+    def get_proximity_risk_setting(investor_root):
+        """
+        Load skip_orders_close_to_position setting from accountmanagement.json.
+        Returns True if orders should be skipped when too close to positions.
+        Returns False if orders should be placed regardless of proximity.
+        Default: False (don't skip)
+        """
+        acc_mgmt_path = investor_root / "accountmanagement.json"
+        
+        if not acc_mgmt_path.exists():
+            print(f"    ℹ️  No accountmanagement.json found - proximity risk check DISABLED")
+            return False
+        
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            settings = config.get("settings", {})
+            skip_close = settings.get("skip_orders_close_to_position", False)
+            
+            if skip_close:
+                print(f"    ⚠️  Proximity risk check ENABLED (skip_orders_close_to_position: true)")
+                print(f"       - Orders too close to existing positions will be SKIPPED")
+            else:
+                print(f"    ✅ Proximity risk check DISABLED (skip_orders_close_to_position: false)")
+                print(f"       - All orders will be placed regardless of proximity")
+            
+            return skip_close
+            
+        except Exception as e:
+            print(f"    ⚠️  Error reading accountmanagement.json: {e}")
+            print(f"       - Defaulting to proximity risk check DISABLED")
+            return False
+    
+    # --- SUB-FUNCTION 2: LOAD INVALID ORDER CONVERSION SETTING ---
+    def get_switch_invalid_setting(investor_root):
+        """
+        Load switch_invalid_to_instant_order setting from accountmanagement.json.
+        Returns True if invalid stop orders should be converted to instant market orders.
+        Returns False if invalid orders should be rejected.
+        Default: False (don't convert)
+        """
+        acc_mgmt_path = investor_root / "accountmanagement.json"
+        
+        if not acc_mgmt_path.exists():
+            print(f"    ℹ️  No accountmanagement.json found - invalid order conversion DISABLED")
+            return False
+        
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            settings = config.get("settings", {})
+            switch_invalid = settings.get("switch_invalid_to_instant_order", False)
+            
+            if switch_invalid:
+                print(f"    🔄 Invalid order conversion ENABLED (switch_invalid_to_instant_order: true)")
+                print(f"       - Invalid BUY_STOP orders will convert to INSTANT_BUY")
+                print(f"       - Invalid SELL_STOP orders will convert to INSTANT_SELL")
+            else:
+                print(f"    ℹ️  Invalid order conversion DISABLED (switch_invalid_to_instant_order: false)")
+                print(f"       - Invalid stop orders will be REJECTED")
+            
+            return switch_invalid
+            
+        except Exception as e:
+            print(f"    ⚠️  Error reading switch_invalid_to_instant setting: {e}")
+            print(f"       - Defaulting to conversion DISABLED")
+            return False
+    
+    # --- SUB-FUNCTION 3: REMOVE CANDLE TIME RECORD ON FAILURE ---
     def remove_candle_time_record(investor_root, symbol, timeframe, current_candle_time):
         """
         Remove a candle time record when order placement fails.
@@ -9044,7 +10589,7 @@ def place_usd_orders(inv_id=None):
         
         return removed_count > 0
     
-    # --- SUB-FUNCTION 2: CHECK AUTHORIZATION STATUS ---
+    # --- SUB-FUNCTION 4: CHECK AUTHORIZATION STATUS ---
     def check_authorization_status(investor_root):
         """Check activities.json for unauthorized actions and bypass status"""
         activities_path = investor_root / "activities.json"
@@ -9074,7 +10619,7 @@ def place_usd_orders(inv_id=None):
             print(f"    ⚠️  Error reading activities.json: {e}")
             return True, None
 
-    # --- SUB-FUNCTION 3: GET ORDER TYPE CONSTANTS ---
+    # --- SUB-FUNCTION 5: GET ORDER TYPE CONSTANTS ---
     def get_mt5_order_type(order_type_str):
         """Convert order type string to MT5 constant"""
         order_type_map = {
@@ -9087,7 +10632,7 @@ def place_usd_orders(inv_id=None):
         }
         return order_type_map.get(order_type_str.lower())
 
-    # --- SUB-FUNCTION 4: GET VOLUME FROM SIGNAL ---
+    # --- SUB-FUNCTION 6: GET VOLUME FROM SIGNAL ---
     def get_volume_from_signal(order_data):
         """
         Extract volume from signal data.
@@ -9109,7 +10654,7 @@ def place_usd_orders(inv_id=None):
         # Default volume
         return 0.01
 
-    # --- SUB-FUNCTION 5: CHECK PROXIMITY RISK ---
+    # --- SUB-FUNCTION 7: CHECK PROXIMITY RISK ---
     def check_proximity_risk(order, existing_positions):
         """
         Check if order is too close to existing positions using risk-based calculation.
@@ -9225,7 +10770,7 @@ def place_usd_orders(inv_id=None):
         
         return False, None, 0, 0
 
-    # --- SUB-FUNCTION 6: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
+    # --- SUB-FUNCTION 8: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
     def regulate_orders(investor_root, authorized_keys):
         """
         Cancel ALL pending orders that are NOT in the authorized list.
@@ -9287,17 +10832,209 @@ def place_usd_orders(inv_id=None):
             print(f"    ⚠️  Error during regulation: {e}")
             return 0
 
-    # --- SUB-FUNCTION 7: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
-    def sync_and_save_detailed_history(investor_root, new_trade=None, original_signal_fields=None):
+    # --- SUB-FUNCTION 9: CURRENT PENDING ORDERS AND POSITIONS SNAPSHOT ---
+    def current_pendingorders_and_positions(investor_root):
+        """
+        Checks MT5 for current pending orders and open positions.
+        Records them in tradeshistory.json as a "current_orders" entry within the array.
+        Does NOT include closed orders or historical deals.
+        """
+        def get_current_orders_from_mt5():
+            """Fetch current pending orders and open positions from MT5."""
+            pending_orders = []
+            open_positions = []
+            
+            # Get all pending orders
+            orders = mt5.orders_get()
+            if orders:
+                for order in orders:
+                    order_dict = {
+                        'ticket': order.ticket,
+                        'symbol': order.symbol,
+                        'type': order.type,
+                        'type_name': get_order_type_name(order.type),
+                        'volume_initial': order.volume_initial,
+                        'volume_current': order.volume_current,
+                        'price_open': order.price_open,
+                        'sl': order.sl,
+                        'tp': order.tp,
+                        'magic': order.magic,
+                        'comment': order.comment,
+                        'time_setup': datetime.fromtimestamp(order.time_setup).strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    pending_orders.append(order_dict)
+            
+            # Get all open positions
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    position_dict = {
+                        'ticket': pos.ticket,
+                        'symbol': pos.symbol,
+                        'type': pos.type,
+                        'type_name': get_position_type_name(pos.type),
+                        'volume': pos.volume,
+                        'price_open': pos.price_open,
+                        'price_current': pos.price_current,
+                        'sl': pos.sl,
+                        'tp': pos.tp,
+                        'magic': pos.magic,
+                        'comment': pos.comment,
+                        'time_open': datetime.fromtimestamp(pos.time).strftime('%Y-%m-%d %H:%M:%S'),
+                        'profit': pos.profit,
+                        'swap': pos.swap if hasattr(pos, 'swap') else 0,
+                        'commission': pos.commission if hasattr(pos, 'commission') else 0
+                    }
+                    open_positions.append(position_dict)
+            
+            return pending_orders, open_positions
+        
+        def get_order_type_name(order_type):
+            type_names = {
+                mt5.ORDER_TYPE_BUY: 'BUY',
+                mt5.ORDER_TYPE_SELL: 'SELL',
+                mt5.ORDER_TYPE_BUY_LIMIT: 'BUY_LIMIT',
+                mt5.ORDER_TYPE_SELL_LIMIT: 'SELL_LIMIT',
+                mt5.ORDER_TYPE_BUY_STOP: 'BUY_STOP',
+                mt5.ORDER_TYPE_SELL_STOP: 'SELL_STOP'
+            }
+            return type_names.get(order_type, f'UNKNOWN_{order_type}')
+        
+        def get_position_type_name(pos_type):
+            type_names = {
+                mt5.POSITION_TYPE_BUY: 'BUY',
+                mt5.POSITION_TYPE_SELL: 'SELL'
+            }
+            return type_names.get(pos_type, f'UNKNOWN_{pos_type}')
+        
+        def check_existing_ticket(history, ticket, ticket_type):
+            """Check if a ticket already exists in the current_orders snapshot."""
+            for item in history:
+                if isinstance(item, dict) and "current_orders" in item:
+                    current_orders = item["current_orders"]
+                    
+                    # Check in pending orders
+                    for order in current_orders.get("pending_orders", []):
+                        if order.get("ticket") == ticket:
+                            return True, "pending_order"
+                    
+                    # Check in open positions
+                    for position in current_orders.get("open_positions", []):
+                        if position.get("ticket") == ticket:
+                            return True, "open_position"
+            return False, None
+        
+        print(f"    📊 Taking current orders & positions snapshot...")
+        
+        # Read existing tradeshistory.json first to check for duplicates
+        history_path = investor_root / "tradeshistory.json"
+        history = []
+        
+        if history_path.exists():
+            try:
+                with open(history_path, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+            except Exception as e:
+                print(f"    ⚠️  Error reading tradeshistory.json: {e}")
+                history = []
+        
+        # Fetch current state from MT5
+        pending_orders, open_positions = get_current_orders_from_mt5()
+        
+        # Create sets of active tickets for quick lookup
+        active_pending_tickets = {order['ticket'] for order in pending_orders}
+        active_position_tickets = {pos['ticket'] for pos in open_positions}
+        
+        print(f"    📋 Found: {len(pending_orders)} pending orders, {len(open_positions)} open positions")
+        
+        # Update status for existing records in history (not just current_orders)
+        print(f"    🔄 Updating status for existing records...")
+        
+        # Iterate through all items in history to update status
+        for item in history:
+            if isinstance(item, dict):
+                # Skip the current_orders entry for now, handle separately
+                if "current_orders" in item:
+                    continue
+                
+                ticket = item.get("ticket")
+                if ticket:
+                    if ticket in active_pending_tickets:
+                        if item.get("status") != "pending":
+                            item["status"] = "pending"
+                            print(f"       - Ticket {ticket}: status updated to 'pending'")
+                    elif ticket in active_position_tickets:
+                        if item.get("status") != "running_position":
+                            item["status"] = "running_position"
+                            print(f"       - Ticket {ticket}: status updated to 'running_position'")
+                    else:
+                        if item.get("status") != "closed":
+                            item["status"] = "closed"
+                            print(f"       - Ticket {ticket}: status updated to 'closed'")
+        
+        # Check pending orders
+        if pending_orders:
+            print(f"    🎫 Pending Orders Tickets:")
+            for order in pending_orders:
+                ticket = order['ticket']
+                exists, location = check_existing_ticket(history, ticket, "pending")
+                if exists:
+                    print(f"       - Ticket {ticket} ({order['type_name']}) - ✅ EXISTS! (in {location})")
+                else:
+                    print(f"       - Ticket {ticket} ({order['type_name']}) - 🆕 New")
+        
+        # Check open positions
+        if open_positions:
+            print(f"    💼 Open Positions Tickets:")
+            for position in open_positions:
+                ticket = position['ticket']
+                exists, location = check_existing_ticket(history, ticket, "position")
+                if exists:
+                    print(f"       - Ticket {ticket} ({position['type_name']}) - ✅ EXISTS! (in {location})")
+                else:
+                    print(f"       - Ticket {ticket} ({position['type_name']}) - 🆕 New")
+        
+        # Prepare current_orders data
+        current_orders_data = {
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'pending_orders': pending_orders,
+            'open_positions': open_positions
+        }
+        
+        # Remove any existing "current_orders" entry
+        history = [item for item in history if not isinstance(item, dict) or "current_orders" not in item]
+        
+        # Append the new current_orders entry
+        history.append({"current_orders": current_orders_data})
+        
+        # Save back to file
+        try:
+            with open(history_path, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=4)
+            
+            print(f"    ✅ Saved current orders snapshot to tradeshistory.json")
+            print(f"       - Pending orders: {len(pending_orders)}")
+            print(f"       - Open positions: {len(open_positions)}")
+            
+            return True, {
+                'pending_orders': len(pending_orders),
+                'open_positions': len(open_positions)
+            }
+            
+        except Exception as e:
+            print(f"     Error saving tradeshistory.json: {e}")
+            return False, None
+
+    # --- SUB-FUNCTION 10: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
+    def syncing_orders_and_pnl_details(investor_root, new_trade=None, original_signal_fields=None):
         """
         Synchronizes tradeshistory.json with MT5 terminal.
         Stores COMPLETE order information including all signal fields.
-        Tracks running positions with unique IDs and proper status.
+        Tracks running positions with unique IDs.
         
-        Status types:
-        - 'pending': Order placed but not yet executed
-        - 'running_position': Order executed and position is open (active trade)
-        - 'closed': Position has been closed
+        NOTE: Status updates are now handled by current_pendingorders_and_positions().
+        This function ONLY adds new trades, assigns position IDs, and updates position details.
+        It does NOT change the status of existing trades.
         """
         try:
             history_path = investor_root / "tradeshistory.json"
@@ -9314,37 +11051,55 @@ def place_usd_orders(inv_id=None):
                     print(f"      ⚠️  Error reading tradeshistory.json: {e}")
                     history = []
 
-            # Get current state from MT5
-            active_orders = {o.ticket: o for o in (mt5.orders_get() or [])}
-            active_positions = {p.ticket: p for p in (mt5.positions_get() or [])}
+            # ========== Get CURRENT state for new trade and position ID assignment ==========
+            # Get current pending orders directly from MT5
+            active_orders = {}
+            orders = mt5.orders_get()
+            if orders:
+                for order in orders:
+                    active_orders[order.ticket] = order
             
-            # Fetch history deals (last 7 days)
-            from_date = datetime.now() - timedelta(days=7)
-            history_deals = mt5.history_deals_get(from_date, datetime.now()) or []
+            # Get current open positions directly from MT5
+            active_positions = {}
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    active_positions[pos.ticket] = pos
             
-            # Create mapping of deals by order ticket
-            deals_by_order = {}
-            for deal in history_deals:
-                if hasattr(deal, 'order') and deal.order:
-                    if deal.order not in deals_by_order:
-                        deals_by_order[deal.order] = []
-                    deals_by_order[deal.order].append(deal)
+            print(f"      📊 MT5 Current State: {len(active_orders)} pending orders, {len(active_positions)} open positions")
             
-            # Also create a mapping for the most recent deal per order
-            latest_deal_by_order = {}
-            for order_ticket, deals in deals_by_order.items():
-                # Get the most recent deal (highest time)
-                latest_deal = max(deals, key=lambda d: d.time if hasattr(d, 'time') else 0)
-                latest_deal_by_order[order_ticket] = latest_deal
+            # ========== Build order-to-position mapping for reference ==========
+            order_to_position_map = {}
             
-            # Get current position tickets
-            active_position_tickets = set(active_positions.keys())
+            if positions:
+                for pos in positions:
+                    pos_ticket = pos.ticket
+                    
+                    # Method 1: Direct match (some brokers reuse ticket)
+                    if pos_ticket in active_orders:
+                        order_to_position_map[pos_ticket] = pos_ticket
+                    
+                    # Method 2: Query history orders to find the order that created this position
+                    from_date = datetime.now() - timedelta(days=7)
+                    history_orders = mt5.history_orders_get(from_date, datetime.now())
+                    
+                    if history_orders:
+                        for hist_order in history_orders:
+                            if hasattr(hist_order, 'position_id') and hist_order.position_id == pos_ticket:
+                                order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+                            if hasattr(hist_order, 'position_by_id') and hist_order.position_by_id == pos_ticket:
+                                order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+            
+            print(f"      🔗 Order-to-Position mapping: {len(order_to_position_map)} links found")
             
             # Track next position ID
             position_counter = 1
-            existing_position_ids = [t.get('position_id') for t in history if t.get('position_id')]
+            # Filter out non-dict entries and current_orders snapshots
+            valid_trades = [t for t in history if isinstance(t, dict) and 'current_orders' not in t]
+            existing_position_ids = [t.get('position_id') for t in valid_trades if t.get('position_id')]
             if existing_position_ids:
-                # Extract numeric part from POS_X format
                 max_id = 0
                 for pid in existing_position_ids:
                     if pid and str(pid).startswith('POS_'):
@@ -9355,9 +11110,9 @@ def place_usd_orders(inv_id=None):
                             pass
                 position_counter = max_id + 1
             
-            # Add new trade if provided
+            # ========== Add new trade if provided ==========
             if new_trade:
-                existing_ticket = any(t.get('ticket') == new_trade.get('ticket') for t in history)
+                existing_ticket = any(t.get('ticket') == new_trade.get('ticket') for t in valid_trades)
                 if not existing_ticket:
                     # Preserve ALL original signal fields
                     complete_trade_record = new_trade.copy()
@@ -9368,35 +11123,96 @@ def place_usd_orders(inv_id=None):
                             if key not in complete_trade_record:
                                 complete_trade_record[key] = value
                     
-                    # Set initial status
-                    if new_trade.get('ticket') in active_orders:
+                    # Set initial status based on CURRENT MT5 state (ONLY for NEW trades)
+                    order_ticket = new_trade.get('ticket')
+                    
+                    if order_ticket in active_orders:
                         complete_trade_record['status'] = 'pending'
-                    elif new_trade.get('ticket') in active_positions:
+                    elif order_ticket in active_positions:
                         complete_trade_record['status'] = 'running_position'
+                        if not complete_trade_record.get('position_id'):
+                            complete_trade_record['position_id'] = f"POS_{position_counter}"
+                            position_counter += 1
+                    elif order_ticket in order_to_position_map:
+                        position_ticket = order_to_position_map[order_ticket]
+                        if position_ticket in active_positions:
+                            complete_trade_record['status'] = 'running_position'
+                            if not complete_trade_record.get('position_id'):
+                                complete_trade_record['position_id'] = f"POS_{position_counter}"
+                                position_counter += 1
+                            complete_trade_record['position_ticket'] = position_ticket
                     else:
                         complete_trade_record['status'] = 'pending'  # Default for new orders
                     
                     history.append(complete_trade_record)
-                    print(f"      ➕ Added new trade: Ticket {new_trade.get('ticket')}")
+                    print(f"      ➕ Added new trade: Ticket {new_trade.get('ticket')} with status '{complete_trade_record.get('status')}'")
                 else:
                     print(f"      ℹ️  Trade Ticket {new_trade.get('ticket')} already exists")
 
-            # Update all records with current status
+            # ========== FRESH FETCH for updating existing records (position details only, NO status changes) ==========
+            # Re-fetch current state to ensure we have the absolute latest data
+            fresh_active_positions = {}
+            fresh_positions = mt5.positions_get()
+            if fresh_positions:
+                for pos in fresh_positions:
+                    fresh_active_positions[pos.ticket] = pos
+            
+            # Rebuild order-to-position mapping with fresh data
+            fresh_order_to_position_map = {}
+            if fresh_positions:
+                for pos in fresh_positions:
+                    pos_ticket = pos.ticket
+                    if pos_ticket in active_orders:
+                        fresh_order_to_position_map[pos_ticket] = pos_ticket
+                    
+                    from_date = datetime.now() - timedelta(days=7)
+                    history_orders = mt5.history_orders_get(from_date, datetime.now())
+                    if history_orders:
+                        for hist_order in history_orders:
+                            if hasattr(hist_order, 'position_id') and hist_order.position_id == pos_ticket:
+                                fresh_order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+                            if hasattr(hist_order, 'position_by_id') and hist_order.position_by_id == pos_ticket:
+                                fresh_order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+            
+            # Also get history deals for closure data (profit/commission/swap)
+            from_date = datetime.now() - timedelta(days=7)
+            history_deals = mt5.history_deals_get(from_date, datetime.now()) or []
+            
+            # Build deal lookup by order ticket and position ticket
+            deals_by_order = {}
+            deals_by_position = {}
+            for deal in history_deals:
+                if hasattr(deal, 'order') and deal.order:
+                    if deal.order not in deals_by_order:
+                        deals_by_order[deal.order] = []
+                    deals_by_order[deal.order].append(deal)
+                if hasattr(deal, 'position_id') and deal.position_id:
+                    if deal.position_id not in deals_by_position:
+                        deals_by_position[deal.position_id] = []
+                    deals_by_position[deal.position_id].append(deal)
+            
+            # ========== Update existing records (position details, IDs, P&L - NO STATUS CHANGES) ==========
             updated_count = 0
             
             for idx, trade in enumerate(history):
+                # Skip the current_orders snapshot entry
+                if isinstance(trade, dict) and 'current_orders' in trade:
+                    continue
+                    
                 ticket = trade.get('ticket')
                 if not ticket:
                     continue
                 
-                old_status = trade.get('status', 'unknown')
-                new_status = old_status
                 needs_update = False
                 
-                # Check if this ticket is now a running position
-                if ticket in active_positions:
-                    position = active_positions[ticket]
-                    new_status = 'running_position'
+                # ========== ONLY update position details for running positions ==========
+                # We do NOT change the status field - that's handled by current_pendingorders_and_positions()
+                
+                # Check if this ticket is currently an open position (Direct match)
+                if ticket in fresh_active_positions:
+                    position = fresh_active_positions[ticket]
                     
                     # Assign position ID if not already assigned
                     if not trade.get('position_id'):
@@ -9405,117 +11221,124 @@ def place_usd_orders(inv_id=None):
                         needs_update = True
                         print(f"      🆔 Assigned position ID {trade['position_id']} to ticket {ticket}")
                     
-                    # Update position details
+                    # Update position details (prices, profits, etc.)
                     trade['current_price'] = position.price_current
                     trade['current_profit'] = position.profit
                     trade['open_time'] = datetime.fromtimestamp(position.time).strftime('%Y-%m-%d %H:%M:%S')
                     trade['open_price'] = position.price_open
                     trade['volume_current'] = position.volume
                     trade['current_swap'] = position.swap if hasattr(position, 'swap') else 0
+                    trade['position_ticket'] = position.ticket
                     
-                    # Commission for open positions (if available from position object)
                     if hasattr(position, 'commission'):
                         trade['current_commission'] = position.commission
                     
                     needs_update = True
                     
-                # Check if this ticket is still pending
-                elif ticket in active_orders:
-                    new_status = 'pending'
-                    
-                    # Update pending order details
-                    order = active_orders[ticket]
-                    trade['current_price'] = order.price_current if hasattr(order, 'price_current') else order.price
-                    trade['order_state'] = 'active'
-                    trade['order_type'] = order.type if hasattr(order, 'type') else trade.get('placed_order_type')
-                    needs_update = True
-                    
-                # Check if this ticket was closed (found in deals)
-                elif ticket in latest_deal_by_order:
-                    new_status = 'closed'
-                    deal = latest_deal_by_order[ticket]
-                    
-                    # Only update if not already closed or if status changed
-                    if old_status != 'closed':
-                        # Get profit/loss from the deal
-                        if hasattr(deal, 'profit'):
-                            trade['profit'] = deal.profit
+                # Check if this ticket is mapped to an active position
+                elif ticket in fresh_order_to_position_map:
+                    position_ticket = fresh_order_to_position_map[ticket]
+                    if position_ticket in fresh_active_positions:
+                        position = fresh_active_positions[position_ticket]
                         
-                        # Get commission from the deal (this is where commission is stored!)
-                        if hasattr(deal, 'commission'):
-                            trade['commission'] = deal.commission
-                        elif hasattr(deal, 'commission_value'):
-                            trade['commission'] = deal.commission_value
-                        else:
-                            trade['commission'] = 0
+                        # Assign position ID if not already assigned
+                        if not trade.get('position_id'):
+                            trade['position_id'] = f"POS_{position_counter}"
+                            position_counter += 1
+                            needs_update = True
+                            print(f"      🆔 Assigned position ID {trade['position_id']} to ticket {ticket} (position: {position_ticket})")
                         
-                        # Get swap if available
-                        if hasattr(deal, 'swap'):
-                            trade['swap'] = deal.swap
-                        else:
-                            trade['swap'] = 0
+                        # Update position details
+                        trade['current_price'] = position.price_current
+                        trade['current_profit'] = position.profit
+                        trade['open_time'] = datetime.fromtimestamp(position.time).strftime('%Y-%m-%d %H:%M:%S')
+                        trade['open_price'] = position.price_open
+                        trade['volume_current'] = position.volume
+                        trade['current_swap'] = position.swap if hasattr(position, 'swap') else 0
+                        trade['position_ticket'] = position_ticket
                         
-                        # Get closing price
-                        if hasattr(deal, 'price'):
-                            trade['close_price'] = deal.price
+                        if hasattr(position, 'commission'):
+                            trade['current_commission'] = position.commission
                         
-                        # Get closing time
-                        if hasattr(deal, 'time'):
-                            trade['close_time'] = datetime.fromtimestamp(deal.time).strftime('%Y-%m-%d %H:%M:%S')
-                        
-                        # Get comment/reason
-                        if hasattr(deal, 'comment'):
-                            trade['close_reason'] = deal.comment
-                        else:
-                            trade['close_reason'] = 'market_close'
-                        
-                        # Calculate total P&L including commission
-                        total_profit = trade.get('profit', 0)
-                        total_commission = trade.get('commission', 0)
-                        total_swap = trade.get('swap', 0)
-                        trade['total_pnl'] = total_profit + total_commission + total_swap
-                        
-                        needs_update = True
-                        
-                # Check if this ticket no longer exists (expired or cancelled)
-                elif ticket not in active_orders and ticket not in active_positions and ticket not in latest_deal_by_order:
-                    if trade.get('status') not in ['closed', 'cancelled']:
-                        new_status = 'closed'
-                        trade['close_reason'] = 'expired_or_not_found'
-                        trade['close_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        trade['profit'] = trade.get('profit', 0)
-                        trade['commission'] = trade.get('commission', 0)
-                        trade['swap'] = trade.get('swap', 0)
-                        trade['total_pnl'] = trade.get('profit', 0) + trade.get('commission', 0) + trade.get('swap', 0)
                         needs_update = True
                 
-                # Update status if changed
-                if new_status != old_status:
-                    trade['status'] = new_status
-                    needs_update = True
-                    print(f"      🔄 Trade {ticket}: {old_status} → {new_status}")
+                # ========== Update closed position P&L data (but NOT the status) ==========
+                # Only update financial data for positions that already have 'closed' status
+                if trade.get('status') == 'closed':
+                    # Check deals by order ticket
+                    related_deals = deals_by_order.get(ticket, [])
+                    
+                    # Also check deals by position ticket (if we have one stored)
+                    position_ticket = trade.get('position_ticket')
+                    if position_ticket and position_ticket in deals_by_position:
+                        related_deals.extend(deals_by_position[position_ticket])
+                    
+                    if related_deals:
+                        # Calculate totals from deals
+                        total_profit = 0
+                        total_commission = 0
+                        total_swap = 0
+                        close_price = None
+                        close_time = None
+                        close_reason = None
+                        
+                        for deal in related_deals:
+                            if hasattr(deal, 'profit'):
+                                total_profit += deal.profit
+                            if hasattr(deal, 'commission'):
+                                total_commission += deal.commission
+                            if hasattr(deal, 'swap'):
+                                total_swap += deal.swap
+                            if hasattr(deal, 'price') and deal.price > 0:
+                                close_price = deal.price
+                                close_time = datetime.fromtimestamp(deal.time).strftime('%Y-%m-%d %H:%M:%S')
+                            if hasattr(deal, 'comment') and deal.comment:
+                                close_reason = deal.comment
+                        
+                        # Update financial data if changed
+                        current_profit = trade.get('profit', 0)
+                        current_commission = trade.get('commission', 0)
+                        current_swap = trade.get('swap', 0)
+                        
+                        if (current_profit != total_profit or 
+                            current_commission != total_commission or 
+                            current_swap != total_swap):
+                            
+                            trade['profit'] = total_profit
+                            trade['commission'] = total_commission
+                            trade['swap'] = total_swap
+                            trade['total_pnl'] = total_profit + total_commission + total_swap
+                            
+                            if close_price and not trade.get('close_price'):
+                                trade['close_price'] = close_price
+                            if close_time and not trade.get('close_time'):
+                                trade['close_time'] = close_time
+                            if close_reason and not trade.get('close_reason'):
+                                trade['close_reason'] = close_reason
+                            
+                            needs_update = True
+                
+                if needs_update:
                     updated_count += 1
-                elif needs_update:
-                    # Still update even if status same (for price updates)
-                    if 'status' not in trade or trade['status'] != new_status:
-                        trade['status'] = new_status
-                        updated_count += 1
             
             # Second pass: ensure all running positions have position_id
             for trade in history:
-                if trade.get('status') == 'running_position' and not trade.get('position_id'):
-                    trade['position_id'] = f"POS_{position_counter}"
-                    position_counter += 1
-                    updated_count += 1
-                    print(f"      🆔 Assigned position ID {trade['position_id']} to running position ticket {trade.get('ticket')}")
+                if isinstance(trade, dict) and 'current_orders' not in trade:
+                    if trade.get('status') == 'running_position' and not trade.get('position_id'):
+                        trade['position_id'] = f"POS_{position_counter}"
+                        position_counter += 1
+                        updated_count += 1
+                        print(f"      🆔 Assigned position ID {trade['position_id']} to running position ticket {trade.get('ticket')}")
             
             # Third pass: calculate total P&L for closed positions if not already calculated
             for trade in history:
-                if trade.get('status') == 'closed' and 'total_pnl' not in trade:
-                    profit = trade.get('profit', 0)
-                    commission = trade.get('commission', 0)
-                    swap = trade.get('swap', 0)
-                    trade['total_pnl'] = profit + commission + swap
+                if isinstance(trade, dict) and 'current_orders' not in trade:
+                    if trade.get('status') == 'closed' and 'total_pnl' not in trade:
+                        profit = trade.get('profit', 0)
+                        commission = trade.get('commission', 0)
+                        swap = trade.get('swap', 0)
+                        trade['total_pnl'] = profit + commission + swap
+                        updated_count += 1
 
             # Save updated history
             with open(history_path, 'w', encoding='utf-8') as f:
@@ -9524,21 +11347,21 @@ def place_usd_orders(inv_id=None):
             if new_trade:
                 print(f"      ✅ Saved new trade to tradeshistory.json")
             elif updated_count > 0:
-                print(f"      ✅ Updated {updated_count} trades in tradeshistory.json (status, prices, position IDs)")
+                print(f"      ✅ Updated {updated_count} trades in tradeshistory.json (position details, IDs, P&L)")
             else:
-                print(f"      ✅ No status changes detected")
+                print(f"      ✅ No updates needed")
             
             # Save backup
             backup_path = investor_root / "tradeshistory_backup.json"
             with open(backup_path, 'w', encoding='utf-8') as f:
                 json.dump(history, f, indent=4)
             
-            # Return statistics
-            running_count = sum(1 for t in history if t.get('status') == 'running_position')
-            pending_count = sum(1 for t in history if t.get('status') == 'pending')
-            closed_count = sum(1 for t in history if t.get('status') == 'closed')
+            # Return statistics (counts based on CURRENT statuses)
+            running_count = sum(1 for t in history if isinstance(t, dict) and 'current_orders' not in t and t.get('status') == 'running_position')
+            pending_count = sum(1 for t in history if isinstance(t, dict) and 'current_orders' not in t and t.get('status') == 'pending')
+            closed_count = sum(1 for t in history if isinstance(t, dict) and 'current_orders' not in t and t.get('status') == 'closed')
             
-            print(f"      📊 Current status: {running_count} running, {pending_count} pending, {closed_count} closed")
+            print(f"      📊 Current status counts: {running_count} running, {pending_count} pending, {closed_count} closed")
             
             return True, {
                 'running_positions': running_count,
@@ -9553,7 +11376,7 @@ def place_usd_orders(inv_id=None):
             traceback.print_exc()
             return False, None
     
-    # --- SUB-FUNCTION 8: CHECK IF SYMBOL IS TRADEABLE ---
+    # --- SUB-FUNCTION 11: CHECK IF SYMBOL IS TRADEABLE ---
     def is_symbol_tradeable(symbol):
         """
         Check if a symbol exists AND trading is enabled.
@@ -9584,7 +11407,7 @@ def place_usd_orders(inv_id=None):
         
         return True
 
-    # --- SUB-FUNCTION 9: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
+    # --- SUB-FUNCTION 12: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
     def find_tradeable_symbol_with_retry(base_symbol, resolution_cache):
         """
         Try ALL suffixes one after another until a tradeable symbol is found.
@@ -9626,7 +11449,7 @@ def place_usd_orders(inv_id=None):
         resolution_cache[cache_key] = None
         return None, None
 
-    # --- SUB-FUNCTION 10: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
+    # --- SUB-FUNCTION 13: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
     def collect_orders_from_signals(investor_root, resolution_cache):
         """
         Collect all orders from limit_orders.json files in ALL strategy subfolders.
@@ -9704,13 +11527,459 @@ def place_usd_orders(inv_id=None):
         print(f"    📡 Total signals collected: {len(entries_with_paths)}")
         return entries_with_paths
 
-    # --- SUB-FUNCTION 11: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
-    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal):
+    # --- SUB-FUNCTION 14: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
+
+    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal, skip_proximity_check, switch_invalid_to_instant=False):
         """
         Execute a single order based on its order_type.
         PRESERVES ALL FIELDS from original signal for tradeshistory.
         REMOVES CANDLE TIME RECORD IF ORDER PLACEMENT FAILS.
+        
+        Args:
+            skip_proximity_check: If True, skips proximity risk check entirely
+            switch_invalid_to_instant: If True, converts invalid stop orders to instant market orders
         """
+        
+        # --- SUB-FUNCTION: GET SUPPORTED FILLING MODES ---
+        def get_supported_filling_modes(symbol_info, is_pending_order=False):
+            """
+            Determine supported filling modes for a symbol based on its properties.
+            Returns list of filling modes to try in order of preference.
+            
+            Args:
+                symbol_info: MT5 symbol info object
+                is_pending_order: True for pending orders, False for market orders
+            
+            Returns:
+                list: List of filling mode constants to try
+            """
+            if is_pending_order:
+                # For pending orders, most brokers only support RETURN mode
+                # Some brokers don't support any filling mode for pending orders
+                return [mt5.ORDER_FILLING_RETURN]
+            
+            # For market orders, check symbol properties
+            execution_mode = symbol_info.trade_exemode
+            filling_mode_mask = symbol_info.filling_mode
+            
+            # Debug output
+            print(f"        📋 Symbol filling mode mask: {filling_mode_mask}")
+            print(f"        📋 Execution mode: {execution_mode}")
+            
+            # SYMBOL_FILLING flags
+            SYMBOL_FILLING_FOK = 0x01  # Fill or Kill
+            SYMBOL_FILLING_IOC = 0x02  # Immediate or Cancel
+            SYMBOL_FILLING_BOC = 0x04  # Book or Cancel (since build 3800)
+            
+            filling_modes = []
+            
+            # Strategy 1: For Exchange Execution, try BOC, IOC, FOK
+            if execution_mode == mt5.SYMBOL_TRADE_EXECUTION_EXCHANGE:
+                if filling_mode_mask & SYMBOL_FILLING_BOC:
+                    filling_modes.append(mt5.ORDER_FILLING_BOC)
+                if filling_mode_mask & SYMBOL_FILLING_IOC:
+                    filling_modes.append(mt5.ORDER_FILLING_IOC)
+                if filling_mode_mask & SYMBOL_FILLING_FOK:
+                    filling_modes.append(mt5.ORDER_FILLING_FOK)
+                # Always add RETURN as fallback
+                filling_modes.append(mt5.ORDER_FILLING_RETURN)
+            
+            # Strategy 2: For Market Execution, try IOC first, then RETURN
+            elif execution_mode == mt5.SYMBOL_TRADE_EXECUTION_MARKET:
+                if filling_mode_mask & SYMBOL_FILLING_IOC:
+                    filling_modes.append(mt5.ORDER_FILLING_IOC)
+                # Some brokers with Market Execution work better with RETURN
+                filling_modes.append(mt5.ORDER_FILLING_RETURN)
+                if filling_mode_mask & SYMBOL_FILLING_FOK:
+                    filling_modes.append(mt5.ORDER_FILLING_FOK)
+            
+            # Strategy 3: For Instant/Request Execution, try FOK
+            elif execution_mode in [mt5.SYMBOL_TRADE_EXECUTION_INSTANT, mt5.SYMBOL_TRADE_EXECUTION_REQUEST]:
+                if filling_mode_mask & SYMBOL_FILLING_FOK:
+                    filling_modes.append(mt5.ORDER_FILLING_FOK)
+                filling_modes.append(mt5.ORDER_FILLING_RETURN)
+            
+            # Strategy 4: Unknown execution mode - try common modes
+            else:
+                filling_modes = [
+                    mt5.ORDER_FILLING_IOC,
+                    mt5.ORDER_FILLING_FOK,
+                    mt5.ORDER_FILLING_RETURN
+                ]
+            
+            # Remove duplicates while preserving order
+            unique_modes = []
+            for mode in filling_modes:
+                if mode not in unique_modes:
+                    unique_modes.append(mode)
+            
+            print(f"        📋 Will try filling modes in order: {unique_modes}")
+            return unique_modes
+        
+        # --- SUB-FUNCTION: SEND ORDER WITH AUTO FILLING MODE RETRY ---
+        def send_order_with_auto_filling(request_template, filling_modes, is_pending_order=False):
+            """
+            Send order with automatic retry using different filling modes.
+            
+            Args:
+                request_template: Base request dictionary (without type_filling)
+                filling_modes: List of filling modes to try
+                is_pending_order: True for pending orders
+            
+            Returns:
+                tuple: (result, used_filling_mode, error_message)
+            """
+            for filling_mode in filling_modes:
+                # Create request copy with current filling mode
+                request = request_template.copy()
+                request["type_filling"] = filling_mode
+                
+                # For pending orders, ensure action is PENDING
+                if is_pending_order:
+                    request["action"] = mt5.TRADE_ACTION_PENDING
+                else:
+                    request["action"] = mt5.TRADE_ACTION_DEAL
+                
+                # Send order
+                result = mt5.order_send(request)
+                
+                # Check if successful
+                if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    print(f"        ✅ Order successful with filling mode: {filling_mode}")
+                    return result, filling_mode, None
+                
+                # Check if we should try next filling mode
+                if result is not None and result.retcode == 10009:  # Unsupported filling mode
+                    print(f"        ⚠️  Filling mode {filling_mode} not supported, trying next...")
+                    continue
+                elif result is not None and result.retcode != mt5.TRADE_RETCODE_DONE:
+                    # Other error - don't retry, return the error
+                    return result, filling_mode, f"Order failed: {result.comment} (code: {result.retcode})"
+            
+            # All filling modes failed
+            return None, None, "All filling modes failed"
+        
+        # --- SUB-FUNCTION: HANDLE INVALID PRICE CONVERSION ---
+        def should_convert_to_instant(order_type, current_price, entry_price, exit_price, current_opposite_price=None):
+            """
+            Determine if a stop order should be converted to instant market order.
+            
+            Args:
+                order_type: The order type (buy_stop, sell_stop, etc.)
+                current_price: Current market price (ask for buy_stop, bid for sell_stop)
+                entry_price: The requested entry price
+                exit_price: The stop loss price (SL)
+                current_opposite_price: Current opposite price (bid for buy_stop, ask for sell_stop)
+                
+            Returns:
+                tuple: (should_convert, instant_order_type, reason, error_details)
+            """
+            if not switch_invalid_to_instant:
+                return False, None, None, None
+            
+            order_type_lower = order_type.lower()
+            
+            # Only process stop orders
+            if order_type_lower not in ['buy_stop', 'sell_stop']:
+                return False, None, None, None
+            
+            # For BUY_STOP: Entry price should be ABOVE current price
+            if order_type_lower == 'buy_stop':
+                price_difference = entry_price - current_price
+                
+                # Case 1: Entry price is BELOW current price - "too close from below" or "below current price"
+                if entry_price < current_price:
+                    # Check if current price is above the stop loss
+                    if exit_price and exit_price > 0 and current_price <= exit_price:
+                        print(f"             CANNOT CONVERT: Current ASK price ({current_price}) is NOT above SL ({exit_price})")
+                        print(f"               - Instant buy would violate stop loss protection")
+                        return False, None, 'current_price_not_above_sl', {
+                            'reason': f'Current ASK price ({current_price}) is not above stop loss ({exit_price})',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'exit_price': exit_price,
+                            'requirement': 'current_price > exit_price for instant buy conversion'
+                        }
+                    
+                    error_details = {
+                        'reason': f'BUY_STOP entry price is BELOW current market price (too close from below)',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'price_difference': price_difference,
+                        'difference_pips': abs(price_difference) * (10000 if current_price < 100 else 1),
+                        'violation_type': 'price_below_current',
+                        'description': f'The entry price {entry_price} is BELOW the current ASK price {current_price}. For a BUY_STOP order, the entry price MUST be ABOVE the current market price.'
+                    }
+                    print(f"            🔄 INVALID BUY_STOP detected - Price is BELOW current market (too close from below):")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current ASK price: {current_price}")
+                    print(f"               - Distance: {abs(price_difference):.5f} ({abs(price_difference) * 10000:.1f} pips below)")
+                    print(f"            🔄 Converting to INSTANT BUY at market price (current ASK: {current_price})")
+                    return True, 'instant_buy', 'price_below_current', error_details
+                
+                # Case 2: Entry price is EQUAL to current price
+                elif entry_price == current_price:
+                    error_details = {
+                        'reason': f'BUY_STOP entry price is EQUAL to current market price',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current ASK price {current_price}. For a BUY_STOP order, the entry price MUST be ABOVE the current market price.'
+                    }
+                    print(f"            🔄 INVALID BUY_STOP detected - Price is EQUAL to current market:")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current ASK price: {current_price}")
+                    print(f"            🔄 Converting to INSTANT BUY at market price (current ASK: {current_price})")
+                    return True, 'instant_buy', 'price_equal_current', error_details
+                
+                # Case 3: Entry price is ABOVE current price but too close
+                elif entry_price > current_price:
+                    points_above = (entry_price - current_price) / symbol_info.point if symbol_info.point > 0 else 0
+                    if points_above < 10:  # Too close from above
+                        error_details = {
+                            'reason': f'BUY_STOP entry price is too close from above (only {points_above:.1f} points above)',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'points_above': points_above,
+                            'minimum_points': 10,
+                            'violation_type': 'too_close_from_above',
+                            'description': f'The entry price {entry_price} is only {points_above:.1f} points ABOVE the current ASK price {current_price}. Minimum distance required is 10 points.'
+                        }
+                        print(f"            ⚠️  BUY_STOP too close from above detected:")
+                        print(f"               - Entry price: {entry_price}")
+                        print(f"               - Current ASK price: {current_price}")
+                        print(f"               - Distance: {points_above:.1f} points above (minimum required: 10 points)")
+                        print(f"            🔄 Converting to INSTANT BUY at market price")
+                        
+                        # Check stop loss condition
+                        if exit_price and exit_price > 0 and current_price <= exit_price:
+                            print(f"             CANNOT CONVERT: Current ASK price ({current_price}) is NOT above SL ({exit_price})")
+                            return False, None, 'current_price_not_above_sl', {
+                                'reason': f'Current ASK price ({current_price}) is not above stop loss ({exit_price})'
+                            }
+                        
+                        return True, 'instant_buy', 'too_close_from_above', error_details
+                    else:
+                        # Valid BUY_STOP - no conversion needed
+                        return False, None, None, None
+            
+            # For SELL_STOP: Entry price should be BELOW current price
+            elif order_type_lower == 'sell_stop':
+                price_difference = current_price - entry_price
+                
+                # Case 1: Entry price is ABOVE current price - "too close from above" or "above current price"
+                if entry_price > current_price:
+                    # Check if current price is below the stop loss
+                    if exit_price and exit_price > 0 and current_price >= exit_price:
+                        print(f"             CANNOT CONVERT: Current BID price ({current_price}) is NOT below SL ({exit_price})")
+                        print(f"               - Instant sell would violate stop loss protection")
+                        return False, None, 'current_price_not_below_sl', {
+                            'reason': f'Current BID price ({current_price}) is not below stop loss ({exit_price})',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'exit_price': exit_price,
+                            'requirement': 'current_price < exit_price for instant sell conversion'
+                        }
+                    
+                    error_details = {
+                        'reason': f'SELL_STOP entry price is ABOVE current market price (too close from above)',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'price_difference': price_difference,
+                        'difference_pips': abs(price_difference) * (10000 if current_price < 100 else 1),
+                        'violation_type': 'price_above_current',
+                        'description': f'The entry price {entry_price} is ABOVE the current BID price {current_price}. For a SELL_STOP order, the entry price MUST be BELOW the current market price.'
+                    }
+                    print(f"            🔄 INVALID SELL_STOP detected - Price is ABOVE current market (too close from above):")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current BID price: {current_price}")
+                    print(f"               - Distance: {abs(entry_price - current_price):.5f} ({abs(entry_price - current_price) * 10000:.1f} pips above)")
+                    print(f"            🔄 Converting to INSTANT SELL at market price (current BID: {current_price})")
+                    return True, 'instant_sell', 'price_above_current', error_details
+                
+                # Case 2: Entry price is EQUAL to current price
+                elif entry_price == current_price:
+                    error_details = {
+                        'reason': f'SELL_STOP entry price is EQUAL to current market price',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current BID price {current_price}. For a SELL_STOP order, the entry price MUST be BELOW the current market price.'
+                    }
+                    print(f"            🔄 INVALID SELL_STOP detected - Price is EQUAL to current market:")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current BID price: {current_price}")
+                    print(f"            🔄 Converting to INSTANT SELL at market price (current BID: {current_price})")
+                    return True, 'instant_sell', 'price_equal_current', error_details
+                
+                # Case 3: Entry price is BELOW current price but too close
+                elif entry_price < current_price:
+                    points_below = (current_price - entry_price) / symbol_info.point if symbol_info.point > 0 else 0
+                    if points_below < 10:  # Too close from below
+                        error_details = {
+                            'reason': f'SELL_STOP entry price is too close from below (only {points_below:.1f} points below)',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'points_below': points_below,
+                            'minimum_points': 10,
+                            'violation_type': 'too_close_from_below',
+                            'description': f'The entry price {entry_price} is only {points_below:.1f} points BELOW the current BID price {current_price}. Minimum distance required is 10 points.'
+                        }
+                        print(f"            ⚠️  SELL_STOP too close from below detected:")
+                        print(f"               - Entry price: {entry_price}")
+                        print(f"               - Current BID price: {current_price}")
+                        print(f"               - Distance: {points_below:.1f} points below (minimum required: 10 points)")
+                        print(f"            🔄 Converting to INSTANT SELL at market price")
+                        
+                        # Check stop loss condition
+                        if exit_price and exit_price > 0 and current_price >= exit_price:
+                            print(f"             CANNOT CONVERT: Current BID price ({current_price}) is NOT below SL ({exit_price})")
+                            return False, None, 'current_price_not_below_sl', {
+                                'reason': f'Current BID price ({current_price}) is not below stop loss ({exit_price})'
+                            }
+                        
+                        return True, 'instant_sell', 'too_close_from_below', error_details
+                    else:
+                        # Valid SELL_STOP - no conversion needed
+                        return False, None, None, None
+            
+            return False, None, None, None
+        
+        # --- SUB-FUNCTION: VALIDATE ORDER PRICE BEFORE SENDING ---
+        def validate_order_price(order_type, entry_price, current_ask, current_bid, symbol_info, tick):
+            """
+            Comprehensive pre-validation of order price with clear word-based messages.
+            Returns (is_valid, error_message, details_dict)
+            """
+            order_type_lower = order_type.lower()
+            
+            # Get point value for precise calculations
+            point = symbol_info.point
+            digits = symbol_info.digits
+            
+            # For market orders, no price validation needed beyond tick availability
+            if order_type_lower in ['instant_buy', 'instant_sell']:
+                if order_type_lower == 'instant_buy' and (current_ask is None or current_ask <= 0):
+                    return False, "No valid ASK price available for market buy", {'current_ask': current_ask}
+                if order_type_lower == 'instant_sell' and (current_bid is None or current_bid <= 0):
+                    return False, "No valid BID price available for market sell", {'current_bid': current_bid}
+                return True, None, None
+            
+            # Validate pending order prices
+            if order_type_lower == 'buy_stop':
+                points_above = (entry_price - current_ask) / point if point > 0 else 0
+                
+                if entry_price < current_ask:
+                    return False, f"BUY_STOP entry price is BELOW current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'difference': entry_price - current_ask,
+                        'difference_points': points_above,
+                        'violation_type': 'price_below_current',
+                        'description': f'The entry price {entry_price} is BELOW the current ASK price {current_ask}'
+                    }
+                elif entry_price == current_ask:
+                    return False, f"BUY_STOP entry price is EQUAL to current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current ASK price {current_ask}'
+                    }
+                elif points_above < 10:
+                    return False, f"BUY_STOP entry price is too close from above (only {points_above:.1f} points above current ASK)", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'points_above': points_above,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_above',
+                        'description': f'The entry price is only {points_above:.1f} points ABOVE the current ASK price. Minimum distance is 10 points.'
+                    }
+                    
+            elif order_type_lower == 'sell_stop':
+                points_below = (current_bid - entry_price) / point if point > 0 else 0
+                
+                if entry_price > current_bid:
+                    return False, f"SELL_STOP entry price is ABOVE current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'difference': entry_price - current_bid,
+                        'difference_points': points_below,
+                        'violation_type': 'price_above_current',
+                        'description': f'The entry price {entry_price} is ABOVE the current BID price {current_bid}'
+                    }
+                elif entry_price == current_bid:
+                    return False, f"SELL_STOP entry price is EQUAL to current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current BID price {current_bid}'
+                    }
+                elif points_below < 10:
+                    return False, f"SELL_STOP entry price is too close from below (only {points_below:.1f} points below current BID)", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'points_below': points_below,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_below',
+                        'description': f'The entry price is only {points_below:.1f} points BELOW the current BID price. Minimum distance is 10 points.'
+                    }
+            
+            elif order_type_lower == 'buy_limit':
+                points_below = (current_ask - entry_price) / point if point > 0 else 0
+                
+                if entry_price > current_ask:
+                    return False, f"BUY_LIMIT entry price is ABOVE current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'violation_type': 'price_above_current',
+                        'description': f'The entry price {entry_price} is ABOVE the current ASK price {current_ask}'
+                    }
+                elif entry_price == current_ask:
+                    return False, f"BUY_LIMIT entry price is EQUAL to current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current ASK price {current_ask}'
+                    }
+                elif points_below < 10:
+                    return False, f"BUY_LIMIT entry price is too close from above (only {points_below:.1f} points below current ASK)", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'points_below': points_below,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_above',
+                        'description': f'The entry price is only {points_below:.1f} points BELOW the current ASK price. Minimum distance is 10 points.'
+                    }
+            
+            elif order_type_lower == 'sell_limit':
+                points_above = (entry_price - current_bid) / point if point > 0 else 0
+                
+                if entry_price < current_bid:
+                    return False, f"SELL_LIMIT entry price is BELOW current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'violation_type': 'price_below_current',
+                        'description': f'The entry price {entry_price} is BELOW the current BID price {current_bid}'
+                    }
+                elif entry_price == current_bid:
+                    return False, f"SELL_LIMIT entry price is EQUAL to current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current BID price {current_bid}'
+                    }
+                elif points_above < 10:
+                    return False, f"SELL_LIMIT entry price is too close from below (only {points_above:.1f} points above current BID)", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'points_above': points_above,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_below',
+                        'description': f'The entry price is only {points_above:.1f} points ABOVE the current BID price. Minimum distance is 10 points.'
+                    }
+            
+            return True, None, None
+        
         symbol = order_data.get('symbol')
         order_type = order_data.get('order_type', '').lower()
         entry_price = float(order_data.get('entry', 0))
@@ -9719,15 +11988,14 @@ def place_usd_orders(inv_id=None):
         volume = get_volume_from_signal(order_data)
         magic_number = int(order_data.get('magic', int(investor_root.name) if investor_root.name.isdigit() else 123456))
         strategy_name = order_data.get('strategy_name', 'unknown')
-        timeframe = order_data.get('timeframe', '')  # Get timeframe for record removal
-        current_candle_time = order_data.get('current_candle_time', '')  # Get candle time for record removal
+        timeframe = order_data.get('timeframe', '')
+        current_candle_time = order_data.get('current_candle_time', '')
         
         # Get symbol info - use exact symbol name
         if not mt5.symbol_select(symbol, True):
             error_msg = f"Failed to select symbol {symbol}"
             print(f"         {error_msg}")
             
-            # Remove candle time record if we have the necessary info
             if timeframe and current_candle_time:
                 print(f"        🗑️ Removing candle time record due to symbol selection failure...")
                 remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
@@ -9739,12 +12007,92 @@ def place_usd_orders(inv_id=None):
             error_msg = f"Cannot get symbol info for {symbol}"
             print(f"         {error_msg}")
             
-            # Remove candle time record if we have the necessary info
             if timeframe and current_candle_time:
                 print(f"        🗑️ Removing candle time record due to symbol info failure...")
                 remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
             
             return False, None, error_msg, None
+        
+        # Get current market prices for validation
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            error_msg = f"Cannot get tick for {symbol}"
+            print(f"         {error_msg}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to tick retrieval failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, None
+        
+        current_ask = tick.ask
+        current_bid = tick.bid
+        
+        # --- CHECK AND HANDLE INVALID PRICE CONVERSION (with enhanced logic) ---
+        original_order_type = order_type
+        
+        # Get the appropriate current price based on order type
+        current_price_for_conversion = current_ask if order_type == 'buy_stop' else current_bid
+        opposite_price = current_bid if order_type == 'buy_stop' else current_ask
+        
+        should_convert, instant_type, conversion_reason, conversion_error_details = should_convert_to_instant(
+            order_type, 
+            current_price_for_conversion, 
+            entry_price,
+            exit_price,
+            opposite_price
+        )
+        
+        if should_convert:
+            # Check stop loss condition before converting
+            if order_type == 'buy_stop' and exit_price and exit_price > 0:
+                if current_ask <= exit_price:
+                    print(f"             INSTANT BUY CONVERSION REJECTED: Current ASK ({current_ask}) is not above SL ({exit_price})")
+                    print(f"               - Would violate stop loss protection")
+                    if timeframe and current_candle_time:
+                        remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+                    return False, None, f"Conversion blocked: current price not above stop loss", None
+            
+            elif order_type == 'sell_stop' and exit_price and exit_price > 0:
+                if current_bid >= exit_price:
+                    print(f"             INSTANT SELL CONVERSION REJECTED: Current BID ({current_bid}) is not below SL ({exit_price})")
+                    print(f"               - Would violate stop loss protection")
+                    if timeframe and current_candle_time:
+                        remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+                    return False, None, f"Conversion blocked: current price not below stop loss", None
+            
+            # Convert to instant market order
+            order_type = instant_type
+            print(f"            ✅ Converted {original_order_type.upper()} to {instant_type.upper()}")
+            print(f"               Original entry: {entry_price} | Current price: {current_ask if 'buy' in instant_type else current_bid}")
+            if conversion_error_details:
+                print(f"               Conversion reason: {conversion_error_details.get('reason', conversion_reason)}")
+                if 'description' in conversion_error_details:
+                    print(f"               {conversion_error_details['description']}")
+        
+        # --- PRE-VALIDATION: Check if price is valid BEFORE sending to MT5 ---
+        print(f"        🔍 Pre-validating {order_type.upper()} order...")
+        is_valid, validation_error, validation_details = validate_order_price(
+            order_type, entry_price, current_ask, current_bid, symbol_info, tick
+        )
+        
+        if not is_valid and not should_convert:
+            print(f"         PRICE VALIDATION FAILED: {validation_error}")
+            if validation_details:
+                print(f"           Details:")
+                for key, value in validation_details.items():
+                    if key != 'description':
+                        print(f"             - {key}: {value}")
+                if 'description' in validation_details:
+                    print(f"           {validation_details['description']}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to validation failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, validation_error, None
+        
+        print(f"        ✅ Price validation passed")
         
         # Round values to symbol digits
         entry_price = round(entry_price, symbol_info.digits)
@@ -9758,7 +12106,6 @@ def place_usd_orders(inv_id=None):
             error_msg = f"Invalid order type: {order_type}"
             print(f"         {error_msg}")
             
-            # Remove candle time record if we have the necessary info
             if timeframe and current_candle_time:
                 print(f"        🗑️ Removing candle time record due to invalid order type...")
                 remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
@@ -9774,39 +12121,32 @@ def place_usd_orders(inv_id=None):
             print(f"        ⏭️  SKIP - {error_msg}")
             return False, None, error_msg, cache_key
         
-        # Check proximity risk
-        is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions)
-        
-        if is_risk:
-            error_msg = f"Too close to position #{risk_position.ticket if risk_position else 'unknown'}"
-            print(f"        ⚠️  RISK SKIP - {error_msg} (risk: ${risk_amount:.2f} < threshold: ${risk_threshold:.2f})")
+        # Check proximity risk ONLY if enabled in settings
+        if skip_proximity_check:
+            print(f"        ℹ️  Proximity risk check DISABLED - placing order regardless of position proximity")
+        else:
+            is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions)
             
-            # Remove candle time record if we have the necessary info (risk skip also counts as failure for reprocessing)
-            if timeframe and current_candle_time:
-                print(f"        🗑️ Removing candle time record due to proximity risk...")
-                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
-            
-            return False, None, error_msg, cache_key
-        
-        # Prepare request based on order type
-        if order_type in ['instant_buy', 'instant_sell']:
-            # Market order (instant execution)
-            tick = mt5.symbol_info_tick(symbol)
-            if not tick:
-                error_msg = f"Cannot get tick for {symbol}"
-                print(f"         {error_msg}")
+            if is_risk:
+                error_msg = f"Too close to position #{risk_position.ticket if risk_position else 'unknown'}"
+                print(f"        ⚠️  RISK SKIP - {error_msg} (risk: ${risk_amount:.2f} < threshold: ${risk_threshold:.2f})")
                 
-                # Remove candle time record
                 if timeframe and current_candle_time:
-                    print(f"        🗑️ Removing candle time record due to tick retrieval failure...")
+                    print(f"        🗑️ Removing candle time record due to proximity risk...")
                     remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
                 
                 return False, None, error_msg, cache_key
+        
+        # --- GET SUPPORTED FILLING MODES ---
+        is_pending = order_type not in ['instant_buy', 'instant_sell']
+        filling_modes = get_supported_filling_modes(symbol_info, is_pending)
+        
+        # --- PREPARE REQUEST TEMPLATE (without type_filling) ---
+        if order_type in ['instant_buy', 'instant_sell']:
+            # Market order (instant execution)
+            price = current_ask if order_type == 'instant_buy' else current_bid
             
-            price = tick.ask if order_type == 'instant_buy' else tick.bid
-            
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
+            request_template = {
                 "symbol": symbol,
                 "volume": volume,
                 "type": mt5_order_type,
@@ -9815,18 +12155,16 @@ def place_usd_orders(inv_id=None):
                 "magic": magic_number,
                 "comment": f"{strategy_name[:20]} RR{order_data.get('risk_reward', '?')}",
                 "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
             }
             
             if exit_price:
-                request["sl"] = exit_price
+                request_template["sl"] = exit_price
             if target_price:
-                request["tp"] = target_price
+                request_template["tp"] = target_price
                 
         else:
             # Pending order
-            request = {
-                "action": mt5.TRADE_ACTION_PENDING,
+            request_template = {
                 "symbol": symbol,
                 "volume": volume,
                 "type": mt5_order_type,
@@ -9835,22 +12173,23 @@ def place_usd_orders(inv_id=None):
                 "magic": magic_number,
                 "comment": f"{strategy_name[:20]} RR{order_data.get('risk_reward', '?')}",
                 "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_RETURN,
             }
             
             if exit_price:
-                request["sl"] = exit_price
+                request_template["sl"] = exit_price
             if target_price:
-                request["tp"] = target_price
+                request_template["tp"] = target_price
         
-        # Send order
-        result = mt5.order_send(request)
+        # --- SEND ORDER WITH AUTO FILLING MODE RETRY ---
+        result, used_filling_mode, error_msg = send_order_with_auto_filling(
+            request_template, filling_modes, is_pending
+        )
         
+        # Handle order send failure
         if result is None:
-            error_msg = f"Order send failed: {mt5.last_error()}"
+            error_msg = f"Order send failed: {error_msg or mt5.last_error()}"
             print(f"         {error_msg}")
             
-            # Remove candle time record
             if timeframe and current_candle_time:
                 print(f"        🗑️ Removing candle time record due to order send failure...")
                 remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
@@ -9861,7 +12200,36 @@ def place_usd_orders(inv_id=None):
             error_msg = f"Order failed: {result.comment} (code: {result.retcode})"
             print(f"         {error_msg}")
             
-            # Remove candle time record on failure
+            # If we get an MT5 error, add context with word-based descriptions
+            if result.retcode == 10015:  # Invalid price
+                print(f"         💡 Detailed analysis of MT5 error 10015 (Invalid price):")
+                print(f"            - Order type: {order_type.upper()}")
+                print(f"            - Entry price: {entry_price}")
+                print(f"            - Current ASK price: {current_ask}")
+                print(f"            - Current BID price: {current_bid}")
+                
+                if order_type == 'buy_stop':
+                    if entry_price <= current_ask:
+                        print(f"             PROBLEM: Entry price is NOT ABOVE current ASK price")
+                        print(f"               - Current situation: Entry price is {entry_price} which is {'BELOW' if entry_price < current_ask else 'EQUAL TO'} current ASK {current_ask}")
+                        print(f"               - Required: Entry price MUST be ABOVE current ASK price")
+                    else:
+                        points_above = (entry_price - current_ask) / symbol_info.point if symbol_info.point > 0 else 0
+                        print(f"             PROBLEM: Entry price is too close from above")
+                        print(f"               - Distance: {points_above:.1f} points above current ASK")
+                        print(f"               - Required: At least 10 points distance")
+                
+                elif order_type == 'sell_stop':
+                    if entry_price >= current_bid:
+                        print(f"             PROBLEM: Entry price is NOT BELOW current BID price")
+                        print(f"               - Current situation: Entry price is {entry_price} which is {'ABOVE' if entry_price > current_bid else 'EQUAL TO'} current BID {current_bid}")
+                        print(f"               - Required: Entry price MUST be BELOW current BID price")
+                    else:
+                        points_below = (current_bid - entry_price) / symbol_info.point if symbol_info.point > 0 else 0
+                        print(f"             PROBLEM: Entry price is too close from below")
+                        print(f"               - Distance: {points_below:.1f} points below current BID")
+                        print(f"               - Required: At least 10 points distance")
+            
             if timeframe and current_candle_time:
                 print(f"        🗑️ Removing candle time record due to order placement failure...")
                 remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
@@ -9871,20 +12239,34 @@ def place_usd_orders(inv_id=None):
         # Create detailed trade record with ALL fields from original signal
         trade_record = {}
         
-        # First, copy ALL fields from the processed order_data (which already includes signal fields)
+        # First, copy ALL fields from the processed order_data
         for key, value in order_data.items():
             if not key.startswith('_'):  # Skip internal fields
                 trade_record[key] = value
         
-        # Then add MT5-specific fields (will override any conflicts with MT5 data)
+        # Add conversion info if applicable
+        if should_convert:
+            trade_record['converted_from'] = original_order_type
+            trade_record['converted_to'] = order_type
+            trade_record['conversion_reason'] = conversion_reason
+            trade_record['original_entry_price'] = entry_price
+            trade_record['converted_at_price'] = current_ask if 'buy' in order_type else current_bid
+            if conversion_error_details:
+                trade_record['conversion_error_details'] = conversion_error_details
+        
+        # Add filling mode info
+        if used_filling_mode:
+            trade_record['filling_mode_used'] = used_filling_mode
+        
+        # Then add MT5-specific fields
         trade_record.update({
             'ticket': result.order,
             'magic': magic_number,
             'placed_timestamp': datetime.now().isoformat(),
-            'status': 'pending',  # Will be updated on next sync
+            'status': 'pending',
             'mt5_retcode': result.retcode,
             'mt5_comment': result.comment,
-            'placed_price': entry_price if order_type not in ['instant_buy', 'instant_sell'] else (request['price'] if 'price' in request else entry_price),
+            'placed_price': entry_price if order_type not in ['instant_buy', 'instant_sell'] else (request_template['price'] if 'price' in request_template else entry_price),
             'placed_volume': volume,
             'placed_order_type': order_type,
             'strategy_name': strategy_name,
@@ -9898,10 +12280,11 @@ def place_usd_orders(inv_id=None):
                 if key not in trade_record:
                     trade_record[f'original_{key}'] = value
         
-        # Save to history with original signal fields preserved
-        sync_and_save_detailed_history(investor_root, trade_record, original_signal)
+        # Save to history
+        syncing_orders_and_pnl_details(investor_root, trade_record, original_signal)
         
-        print(f"        ✅ SUCCESS: {order_type.upper()} {symbol} @ {entry_price} (Ticket: {result.order}) [Strategy: {strategy_name}]")
+        conversion_msg = f" [CONVERTED from {original_order_type.upper()}]" if should_convert else ""
+        print(f"        ✅ SUCCESS: {order_type.upper()} {symbol} @ {request_template['price'] if 'price' in request_template else entry_price} (Ticket: {result.order}) [Strategy: {strategy_name}]{conversion_msg}")
         return True, result, None, cache_key
 
     # --- MAIN EXECUTION FLOW ---
@@ -9923,7 +12306,9 @@ def place_usd_orders(inv_id=None):
         'total_suffix_retries_successful': 0,
         'total_running_positions': 0,
         'total_pending_orders': 0,
-        'total_candle_records_removed': 0
+        'total_candle_records_removed': 0,
+        'total_proximity_check_disabled': 0,
+        'total_orders_converted': 0
     }
 
     for user_brokerid in investor_ids:
@@ -9946,9 +12331,23 @@ def place_usd_orders(inv_id=None):
             global_stats['investors_blocked'] += 1
             continue
         
-        # STEP 2: Sync existing tradeshistory.json FIRST (to get current status)
+        # STEP 2: Load proximity risk setting from accountmanagement.json
+        print(f"\n  ⚙️  Loading configuration from accountmanagement.json...")
+        skip_proximity_check = not get_proximity_risk_setting(investor_root)
+        
+        if skip_proximity_check:
+            global_stats['total_proximity_check_disabled'] += 1
+        
+        # STEP 3: Load invalid order conversion setting
+        switch_invalid_to_instant = get_switch_invalid_setting(investor_root)
+        
+        # STEP 4: Take initial snapshot of current pending orders and positions (BEFORE sync)
+        print(f"\n  📸 Taking initial snapshot of current orders/positions...")
+        snapshot_success, snapshot_stats = current_pendingorders_and_positions(investor_root)
+        
+        # STEP 5: Sync existing tradeshistory.json (to get current status and assign position IDs)
         print(f"\n  🔄 Syncing tradeshistory.json with MT5 (checking all orders/positions)...")
-        sync_success, sync_stats = sync_and_save_detailed_history(investor_root)
+        sync_success, sync_stats = syncing_orders_and_pnl_details(investor_root)
         
         if sync_stats:
             global_stats['total_running_positions'] += sync_stats.get('running_positions', 0)
@@ -9956,7 +12355,7 @@ def place_usd_orders(inv_id=None):
             print(f"  📊 Current status: {sync_stats.get('running_positions', 0)} running positions, "
                   f"{sync_stats.get('pending_orders', 0)} pending orders")
         
-        # STEP 3: Collect signals from ALL strategy folders
+        # STEP 6: Collect signals from ALL strategy folders
         all_signals = collect_orders_from_signals(investor_root, resolution_cache)
         
         if not all_signals:
@@ -9972,17 +12371,17 @@ def place_usd_orders(inv_id=None):
         if suffix_retries > 0:
             print(f"  🔄 Successfully applied suffix retry to {suffix_retries} signals")
         
-        # STEP 4: Get existing positions for risk check
+        # STEP 7: Get existing positions for risk check
         existing_positions = mt5.positions_get() or []
         print(f"  📊 Found {len(existing_positions)} existing open positions for risk check")
         
-        # STEP 5: Per-order cache for this run
+        # STEP 8: Per-order cache for this run
         per_order_cache = set()
         
-        # STEP 6: Build authorized keys for regulation
+        # STEP 9: Build authorized keys for regulation
         authorized_keys = set()
         
-        # STEP 7: Process each signal
+        # STEP 10: Process each signal
         print(f"\n  📝 Processing {len(all_signals)} signals...")
         
         orders_placed = 0
@@ -9990,6 +12389,7 @@ def place_usd_orders(inv_id=None):
         orders_skipped_risk = 0
         orders_failed = 0
         records_removed = 0
+        orders_converted = 0
         
         for signal_wrapper in all_signals:
             order_data = signal_wrapper['data']
@@ -10008,9 +12408,10 @@ def place_usd_orders(inv_id=None):
             if original_fields > 0:
                 print(f"        📋 Original signal has {original_fields} fields (will be preserved)")
             
-            # Execute order
+            # Execute order with proximity check and conversion settings
             success, result, error, cache_key = execute_order(
-                order_data, investor_root, per_order_cache, existing_positions, original_signal
+                order_data, investor_root, per_order_cache, existing_positions, 
+                original_signal, skip_proximity_check, switch_invalid_to_instant
             )
             
             if cache_key:
@@ -10018,6 +12419,9 @@ def place_usd_orders(inv_id=None):
                     per_order_cache.add(cache_key)
                     authorized_keys.add(cache_key)
                     orders_placed += 1
+                    # Check if this was a converted order
+                    if result and hasattr(result, 'order') and order_data.get('converted_from'):
+                        orders_converted += 1
                 elif error == "Already placed in this run":
                     orders_skipped_duplicate += 1
                 elif "too close" in str(error).lower():
@@ -10029,14 +12433,19 @@ def place_usd_orders(inv_id=None):
                     print(f"         FAILED: {error}")
         
         global_stats['total_candle_records_removed'] += records_removed
+        global_stats['total_orders_converted'] += orders_converted
         
-        # STEP 8: Regulate orders (cancel unauthorized)
+        # STEP 11: Regulate orders (cancel unauthorized)
         print(f"\n  🧹 Running order regulation...")
         cancelled_count = regulate_orders(investor_root, authorized_keys)
         
-        # STEP 9: Final sync to capture any changes from regulation
-        print(f"\n  🔄 Final sync to capture all status changes...")
-        final_sync, final_stats = sync_and_save_detailed_history(investor_root)
+        # STEP 12: Take final snapshot of current pending orders and positions (AFTER placement and regulation)
+        print(f"\n  📸 Taking final snapshot of current orders/positions...")
+        final_snapshot_success, final_snapshot_stats = current_pendingorders_and_positions(investor_root)
+        
+        # STEP 13: Final sync to capture any changes from regulation (ONLY position details, NO status changes)
+        print(f"\n  🔄 Final sync to capture position details...")
+        final_sync, final_stats = syncing_orders_and_pnl_details(investor_root)
         
         if final_stats:
             print(f"  📊 Final status: {final_stats.get('running_positions', 0)} running positions, "
@@ -10053,8 +12462,12 @@ def place_usd_orders(inv_id=None):
         print(f"\n  📊 INVESTOR SUMMARY:")
         print(f"     • Signals processed: {len(all_signals)}")
         print(f"     • Orders placed: {orders_placed}")
+        print(f"     • Orders converted (invalid price): {orders_converted}")
         print(f"     • Skipped (duplicate): {orders_skipped_duplicate}")
-        print(f"     • Skipped (proximity risk - records removed): {orders_skipped_risk}")
+        if skip_proximity_check:
+            print(f"     • Proximity check: DISABLED (all orders placed regardless of position distance)")
+        else:
+            print(f"     • Skipped (proximity risk - records removed): {orders_skipped_risk}")
         print(f"     • Failed (records removed): {orders_failed}")
         print(f"     • Cancelled (regulation): {cancelled_count}")
         if suffix_retries > 0:
@@ -10074,8 +12487,11 @@ def place_usd_orders(inv_id=None):
     print("="*80)
     print(f"  • Investors processed: {global_stats['investors_processed']}")
     print(f"  • Investors blocked: {global_stats['investors_blocked']}")
+    print(f"  • Investors with proximity check disabled: {global_stats['total_proximity_check_disabled']}")
+    print(f"  • Investors with invalid order conversion enabled: {global_stats.get('total_conversion_enabled', 'N/A')}")
     print(f"  • Total signals found: {global_stats['total_signals_found']}")
     print(f"  • Total orders placed: {global_stats['total_orders_placed']}")
+    print(f"  • Orders converted (invalid price): {global_stats['total_orders_converted']}")
     print(f"  • Orders skipped (duplicate): {global_stats['total_orders_skipped_duplicate']}")
     print(f"  • Orders skipped (risk - records removed): {global_stats['total_orders_skipped_risk']}")
     print(f"  • Orders failed (records removed): {global_stats['total_orders_failed']}")
@@ -10087,6 +12503,2535 @@ def place_usd_orders(inv_id=None):
     print("="*80)
     
     return any_orders_placed
+
+def place_usd_orders(inv_id=None):
+    """
+    Places pending orders from limit_orders.json files for investors.
+    
+    ENHANCED FEATURES:
+    1. Detailed tradeshistory.json with complete order information
+    2. Per-order cache to prevent duplicate placement in same run
+    3. Proximity risk check against existing positions (configurable via accountmanagement.json)
+    4. Order regulation - always cancels unauthorized orders
+    5. Dynamic order types: buy_stop, sell_stop, buy_limit, sell_limit, instant_buy, instant_sell
+    6. No conversion logic - places exactly what limit_orders.json specifies
+    7. Uses 'volume' field from signals (ignores deriv_ prefix)
+    8. Recursively finds limit_orders.json in ALL strategy subfolders
+    9. SUFFIX RETRY - automatically tries ALL suffixes if symbol not tradeable
+    10. TRACKING: Running positions get unique IDs and proper status tracking
+    11. FULL FIELD PRESERVATION: All fields from limit_orders.json preserved in tradeshistory
+    12. FAILURE HANDLING: Removes candle_time_records entry if order placement fails
+    13. CONFIGURABLE PROXIMITY RISK: Reads skip_orders_close_to_position from accountmanagement.json
+    14. INVALID PRICE HANDLING: Converts invalid stop orders to instant market orders when enabled
+    15. SINGLE ORDER MANAGEMENT: Only ONE non-hedge order per symbol/type, with fallback to second order if newest fails
+    16. HEDGE ORDER EXEMPTION: Hedge orders (is_hedge_order=true) are ALL placed regardless of uniqueness rules
+    """
+    
+    # --- SUFFIX DICTIONARY FOR RETRY LOGIC ---
+    SYMBOL_SUFFIXES = [
+        "",      # Original symbol first
+        "+",     # Common suffix for some brokers
+        ".m",    # Micro accounts
+        "pro",   # Pro accounts
+        ".pro",  # Pro accounts with dot
+        "c",     # Cent accounts
+        ".c",    # Cent accounts with dot
+        "fx",    # Forex suffix
+        ".fx",   # Forex with dot
+        "e",     # ECN accounts
+        ".e",    # ECN with dot
+        "std",   # Standard accounts
+        ".std",  # Standard with dot
+        "m",     # Mini accounts
+        ".mini", # Mini accounts
+        "micro", # Micro accounts
+        ".micro", # Micro with dot
+        "-",     # Dash suffix
+        ".-",    # Dot dash
+        "_",     # Underscore
+        "._",    # Dot underscore
+        "ecn",   # ECN suffix
+        ".ecn",  # Dot ECN
+        "real",  # Real account
+        ".real", # Dot real
+        "demo",  # Demo account
+        ".demo"  # Dot demo
+    ]
+    
+    # --- SUB-FUNCTION 1: LOAD PROXIMITY RISK SETTING FROM ACCOUNTMANAGEMENT.JSON ---
+    def get_proximity_risk_setting(investor_root):
+        """
+        Load skip_orders_close_to_position setting from accountmanagement.json.
+        Returns True if orders should be skipped when too close to positions.
+        Returns False if orders should be placed regardless of proximity.
+        Default: False (don't skip)
+        """
+        acc_mgmt_path = investor_root / "accountmanagement.json"
+        
+        if not acc_mgmt_path.exists():
+            print(f"    ℹ️  No accountmanagement.json found - proximity risk check DISABLED")
+            return False
+        
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            settings = config.get("settings", {})
+            skip_close = settings.get("skip_orders_close_to_position", False)
+            
+            if skip_close:
+                print(f"    ⚠️  Proximity risk check ENABLED (skip_orders_close_to_position: true)")
+                print(f"       - Orders too close to existing positions will be SKIPPED")
+            else:
+                print(f"    ✅ Proximity risk check DISABLED (skip_orders_close_to_position: false)")
+                print(f"       - All orders will be placed regardless of proximity")
+            
+            return skip_close
+            
+        except Exception as e:
+            print(f"    ⚠️  Error reading accountmanagement.json: {e}")
+            print(f"       - Defaulting to proximity risk check DISABLED")
+            return False
+    
+    # --- SUB-FUNCTION 2: LOAD INVALID ORDER CONVERSION SETTING ---
+    def get_switch_invalid_setting(investor_root):
+        """
+        Load switch_invalid_to_instant_order setting from accountmanagement.json.
+        Returns True if invalid stop orders should be converted to instant market orders.
+        Returns False if invalid orders should be rejected.
+        Default: False (don't convert)
+        """
+        acc_mgmt_path = investor_root / "accountmanagement.json"
+        
+        if not acc_mgmt_path.exists():
+            print(f"    ℹ️  No accountmanagement.json found - invalid order conversion DISABLED")
+            return False
+        
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            settings = config.get("settings", {})
+            switch_invalid = settings.get("switch_invalid_to_instant_order", False)
+            
+            if switch_invalid:
+                print(f"    🔄 Invalid order conversion ENABLED (switch_invalid_to_instant_order: true)")
+                print(f"       - Invalid BUY_STOP orders will convert to INSTANT_BUY")
+                print(f"       - Invalid SELL_STOP orders will convert to INSTANT_SELL")
+            else:
+                print(f"    ℹ️  Invalid order conversion DISABLED (switch_invalid_to_instant_order: false)")
+                print(f"       - Invalid stop orders will be REJECTED")
+            
+            return switch_invalid
+            
+        except Exception as e:
+            print(f"    ⚠️  Error reading switch_invalid_to_instant setting: {e}")
+            print(f"       - Defaulting to conversion DISABLED")
+            return False
+    
+    # --- SUB-FUNCTION 3: REMOVE CANDLE TIME RECORD ON FAILURE ---
+    def remove_candle_time_record(investor_root, symbol, timeframe, current_candle_time):
+        """
+        Remove a candle time record when order placement fails.
+        This allows directional_bias to reprocess the same candle.
+        """
+        # Find the candle_time_records.json file in any strategy folder
+        records_files = list(investor_root.rglob("candle_time_records.json"))
+        
+        if not records_files:
+            print(f"        ⚠️ No candle_time_records.json found to remove record from")
+            return False
+        
+        removed_count = 0
+        
+        for records_file in records_files:
+            try:
+                if not records_file.exists():
+                    continue
+                
+                with open(records_file, 'r', encoding='utf-8') as f:
+                    records = json.load(f)
+                
+                original_count = len(records)
+                
+                # Find and remove matching record
+                filtered_records = []
+                for record in records:
+                    if (record.get('symbol') == symbol and 
+                        record.get('timeframe') == timeframe and 
+                        record.get('current_candle_time') == current_candle_time):
+                        print(f"        🗑️ Removing candle time record: {symbol} [{timeframe}] @ {current_candle_time}")
+                        removed_count += 1
+                        continue  # Skip this record
+                    filtered_records.append(record)
+                
+                if len(filtered_records) < original_count:
+                    # Save updated records
+                    with open(records_file, 'w', encoding='utf-8') as f:
+                        json.dump(filtered_records, f, indent=4)
+                    print(f"        ✅ Removed {original_count - len(filtered_records)} record(s) from {records_file.name}")
+                else:
+                    print(f"        ℹ️ No matching record found in {records_file.name}")
+                    
+            except Exception as e:
+                print(f"        ⚠️ Error processing {records_file}: {e}")
+        
+        return removed_count > 0
+    
+    # --- SUB-FUNCTION 3B: REMOVE SIGNAL FROM LIMIT_ORDERS.JSON ---
+    def remove_signal_from_limit_orders(limit_orders_path, signal_to_remove):
+        """
+        Remove a specific signal from limit_orders.json file.
+        This prevents reprocessing failed signals.
+        """
+        try:
+            if not limit_orders_path.exists():
+                return False
+            
+            with open(limit_orders_path, 'r', encoding='utf-8') as f:
+                signals = json.load(f)
+            
+            original_count = len(signals)
+            
+            # Find and remove the matching signal
+            filtered_signals = []
+            for signal in signals:
+                # Match by symbol, order_type, entry, and current_candle_time
+                if (signal.get('symbol') == signal_to_remove.get('symbol') and
+                    signal.get('order_type') == signal_to_remove.get('order_type') and
+                    signal.get('entry') == signal_to_remove.get('entry') and
+                    signal.get('current_candle_time') == signal_to_remove.get('current_candle_time')):
+                    print(f"        🗑️ Removing failed signal from limit_orders.json")
+                    continue
+                filtered_signals.append(signal)
+            
+            if len(filtered_signals) < original_count:
+                with open(limit_orders_path, 'w', encoding='utf-8') as f:
+                    json.dump(filtered_signals, f, indent=4)
+                print(f"        ✅ Removed {original_count - len(filtered_signals)} signal(s) from limit_orders.json")
+                return True
+            else:
+                print(f"        ℹ️ No matching signal found in limit_orders.json")
+                return False
+                
+        except Exception as e:
+            print(f"        ⚠️ Error removing signal from limit_orders.json: {e}")
+            return False
+    
+    # --- SUB-FUNCTION 4: CHECK AUTHORIZATION STATUS ---
+    def check_authorization_status(investor_root):
+        """Check activities.json for unauthorized actions and bypass status"""
+        activities_path = investor_root / "activities.json"
+        if not activities_path.exists():
+            print(f"    ✅ No activities.json found - proceeding with order placement")
+            return True, None
+        
+        try:
+            with open(activities_path, 'r', encoding='utf-8') as f:
+                activities = json.load(f)
+            unauthorized_detected = activities.get('unauthorized_action_detected', False)
+            bypass_active = activities.get('bypass_restriction', False)
+            autotrading_active = activities.get('activate_autotrading', False)
+            
+            if unauthorized_detected:
+                if bypass_active and autotrading_active:
+                    print(f"    ⚠️  Unauthorized actions detected but BYPASS ACTIVE - proceeding")
+                    return True, activities
+                else:
+                    print(f"    🚫 Unauthorized actions detected - ORDER PLACEMENT BLOCKED")
+                    if not bypass_active: print(f"       - Bypass restriction: DISABLED")
+                    if not autotrading_active: print(f"       - Auto-trading: DISABLED")
+                    return False, activities
+            print(f"    ✅ No unauthorized actions detected - proceeding")
+            return True, activities
+        except Exception as e:
+            print(f"    ⚠️  Error reading activities.json: {e}")
+            return True, None
+
+    # --- SUB-FUNCTION 5: GET ORDER TYPE CONSTANTS ---
+    def get_mt5_order_type(order_type_str):
+        """Convert order type string to MT5 constant"""
+        order_type_map = {
+            'buy_stop': mt5.ORDER_TYPE_BUY_STOP,
+            'sell_stop': mt5.ORDER_TYPE_SELL_STOP,
+            'buy_limit': mt5.ORDER_TYPE_BUY_LIMIT,
+            'sell_limit': mt5.ORDER_TYPE_SELL_LIMIT,
+            'instant_buy': mt5.ORDER_TYPE_BUY,
+            'instant_sell': mt5.ORDER_TYPE_SELL
+        }
+        return order_type_map.get(order_type_str.lower())
+
+    # --- SUB-FUNCTION 6: GET VOLUME FROM SIGNAL ---
+    def get_volume_from_signal(order_data):
+        """
+        Extract volume from signal data.
+        Looks for 'volume' field first, regardless of broker prefix.
+        Returns default 0.01 if not found.
+        """
+        # First try direct 'volume' field
+        if 'volume' in order_data:
+            return float(order_data['volume'])
+        
+        # Try deriv_volume (common in hedge orders)
+        if 'deriv_volume' in order_data:
+            return float(order_data['deriv_volume'])
+        
+        # If not found, look for any key that ends with 'volume' (like deriv_volume, broker_volume, etc.)
+        for key, value in order_data.items():
+            if key.endswith('volume'):
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    continue
+        
+        # Default volume
+        return 0.01
+
+    # --- SUB-FUNCTION 7: CHECK PROXIMITY RISK ---
+    def check_proximity_risk(order, existing_positions):
+        """
+        Check if order is too close to existing positions using risk-based calculation.
+        Returns (is_risk, closest_position, risk_amount, threshold)
+        """
+        symbol = order.get('symbol')
+        order_type = order.get('order_type', '').lower()
+        entry_price = float(order.get('entry', 0))
+        volume = get_volume_from_signal(order)
+        
+        is_buy = 'buy' in order_type
+        is_sell = 'sell' in order_type
+        
+        if not is_buy and not is_sell:
+            return False, None, 0, 0
+        
+        # Filter positions for this symbol (exact match, including suffixes)
+        symbol_positions = [p for p in existing_positions if p.symbol == symbol]
+        if not symbol_positions:
+            return False, None, 0, 0
+        
+        for position in symbol_positions:
+            position_type = position.type
+            position_entry = position.price_open
+            position_volume = position.volume
+            position_sl = position.sl
+            position_ticket = position.ticket
+            
+            is_position_buy = (position_type == mt5.ORDER_TYPE_BUY)
+            is_position_sell = (position_type == mt5.ORDER_TYPE_SELL)
+            
+            # Calculate position risk from SL
+            position_risk = 0
+            if position_sl and position_sl > 0:
+                if is_position_buy:
+                    risk_profit = mt5.order_calc_profit(
+                        mt5.ORDER_TYPE_BUY, symbol, position_volume,
+                        position_entry, position_sl
+                    )
+                else:
+                    risk_profit = mt5.order_calc_profit(
+                        mt5.ORDER_TYPE_SELL, symbol, position_volume,
+                        position_entry, position_sl
+                    )
+                if risk_profit:
+                    position_risk = abs(risk_profit)
+            
+            if position_risk == 0:
+                continue
+            
+            risk_threshold = position_risk / 2  # 50% threshold
+            
+            # SAME DIRECTION CHECK
+            if (is_buy and is_position_buy) or (is_sell and is_position_sell):
+                # Calculate potential risk if order triggers
+                if is_sell and is_position_sell:
+                    if entry_price < position_entry:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_SELL, symbol, min(volume, position_volume),
+                            entry_price, position_entry
+                        ) or 0)
+                    else:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_SELL, symbol, min(volume, position_volume),
+                            position_entry, entry_price
+                        ) or 0)
+                elif is_buy and is_position_buy:
+                    if entry_price > position_entry:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_BUY, symbol, min(volume, position_volume),
+                            position_entry, entry_price
+                        ) or 0)
+                    else:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_BUY, symbol, min(volume, position_volume),
+                            entry_price, position_entry
+                        ) or 0)
+                else:
+                    continue
+                
+                if potential_risk and potential_risk < risk_threshold:
+                    return True, position, potential_risk, risk_threshold
+            
+            # OPPOSITE DIRECTION CHECK
+            elif (is_buy and is_position_sell) or (is_sell and is_position_buy):
+                if is_buy and is_position_sell:
+                    if entry_price > position_entry:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_SELL, symbol, min(volume, position_volume),
+                            position_entry, entry_price
+                        ) or 0)
+                    else:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_BUY, symbol, min(volume, position_volume),
+                            entry_price, position_entry
+                        ) or 0)
+                elif is_sell and is_position_buy:
+                    if entry_price < position_entry:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_SELL, symbol, min(volume, position_volume),
+                            entry_price, position_entry
+                        ) or 0)
+                    else:
+                        potential_risk = abs(mt5.order_calc_profit(
+                            mt5.ORDER_TYPE_BUY, symbol, min(volume, position_volume),
+                            position_entry, entry_price
+                        ) or 0)
+                else:
+                    continue
+                
+                if potential_risk and potential_risk < risk_threshold:
+                    return True, position, potential_risk, risk_threshold
+        
+        return False, None, 0, 0
+
+    # --- SUB-FUNCTION 8: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
+    def regulate_orders(investor_root, authorized_keys):
+        """
+        Cancel ALL pending orders that are NOT in the authorized list.
+        Always runs to keep account clean.
+        """
+        print(f"    🔍 Regulating orders - cancelling unauthorized pending orders...")
+        try:
+            # Load tradeshistory.json to get authorized tickets/magics
+            history_path = investor_root / "tradeshistory.json"
+            authorized_tickets = set()
+            authorized_magics = set()
+            
+            if history_path.exists():
+                with open(history_path, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+                    for trade in history:
+                        if trade.get('ticket'):
+                            authorized_tickets.add(int(trade['ticket']))
+                        if trade.get('magic'):
+                            authorized_magics.add(int(trade['magic']))
+            
+            pending_orders = mt5.orders_get() or []
+            cancelled_count = 0
+            
+            for order in pending_orders:
+                is_authorized = False
+                
+                # Check by ticket
+                if order.ticket in authorized_tickets:
+                    is_authorized = True
+                # Check by magic
+                elif order.magic in authorized_magics:
+                    is_authorized = True
+                # Check by symbol+type+price+volume (from authorized_keys)
+                else:
+                    order_key = f"{order.symbol}_{order.type}_{round(order.price, 5)}_{round(order.volume_current, 2)}"
+                    if order_key in authorized_keys:
+                        is_authorized = True
+                
+                if not is_authorized:
+                    request = {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": order.ticket,
+                        "comment": "Cancelled by regulation - unauthorized"
+                    }
+                    result = mt5.order_send(request)
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        print(f"        ✅ Cancelled unauthorized order: #{order.ticket} ({order.symbol})")
+                        cancelled_count += 1
+            
+            if cancelled_count > 0:
+                print(f"    ✅ Regulation complete: Cancelled {cancelled_count} unauthorized orders")
+            else:
+                print(f"    ✅ No unauthorized orders found")
+                
+            return cancelled_count
+            
+        except Exception as e:
+            print(f"    ⚠️  Error during regulation: {e}")
+            return 0
+
+    # --- SUB-FUNCTION 9: CURRENT PENDING ORDERS AND POSITIONS SNAPSHOT ---
+    def current_pendingorders_and_positions(investor_root):
+        """
+        Checks MT5 for current pending orders and open positions.
+        Records them in tradeshistory.json as a "current_orders" entry within the array.
+        Does NOT include closed orders or historical deals.
+        """
+        def get_current_orders_from_mt5():
+            """Fetch current pending orders and open positions from MT5."""
+            pending_orders = []
+            open_positions = []
+            
+            # Get all pending orders
+            orders = mt5.orders_get()
+            if orders:
+                for order in orders:
+                    order_dict = {
+                        'ticket': order.ticket,
+                        'symbol': order.symbol,
+                        'type': order.type,
+                        'type_name': get_order_type_name(order.type),
+                        'volume_initial': order.volume_initial,
+                        'volume_current': order.volume_current,
+                        'price_open': order.price_open,
+                        'sl': order.sl,
+                        'tp': order.tp,
+                        'magic': order.magic,
+                        'comment': order.comment,
+                        'time_setup': datetime.fromtimestamp(order.time_setup).strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    pending_orders.append(order_dict)
+            
+            # Get all open positions
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    position_dict = {
+                        'ticket': pos.ticket,
+                        'symbol': pos.symbol,
+                        'type': pos.type,
+                        'type_name': get_position_type_name(pos.type),
+                        'volume': pos.volume,
+                        'price_open': pos.price_open,
+                        'price_current': pos.price_current,
+                        'sl': pos.sl,
+                        'tp': pos.tp,
+                        'magic': pos.magic,
+                        'comment': pos.comment,
+                        'time_open': datetime.fromtimestamp(pos.time).strftime('%Y-%m-%d %H:%M:%S'),
+                        'profit': pos.profit,
+                        'swap': pos.swap if hasattr(pos, 'swap') else 0,
+                        'commission': pos.commission if hasattr(pos, 'commission') else 0
+                    }
+                    open_positions.append(position_dict)
+            
+            return pending_orders, open_positions
+        
+        def get_order_type_name(order_type):
+            type_names = {
+                mt5.ORDER_TYPE_BUY: 'BUY',
+                mt5.ORDER_TYPE_SELL: 'SELL',
+                mt5.ORDER_TYPE_BUY_LIMIT: 'BUY_LIMIT',
+                mt5.ORDER_TYPE_SELL_LIMIT: 'SELL_LIMIT',
+                mt5.ORDER_TYPE_BUY_STOP: 'BUY_STOP',
+                mt5.ORDER_TYPE_SELL_STOP: 'SELL_STOP'
+            }
+            return type_names.get(order_type, f'UNKNOWN_{order_type}')
+        
+        def get_position_type_name(pos_type):
+            type_names = {
+                mt5.POSITION_TYPE_BUY: 'BUY',
+                mt5.POSITION_TYPE_SELL: 'SELL'
+            }
+            return type_names.get(pos_type, f'UNKNOWN_{pos_type}')
+        
+        def check_existing_ticket(history, ticket, ticket_type):
+            """Check if a ticket already exists in the current_orders snapshot."""
+            for item in history:
+                if isinstance(item, dict) and "current_orders" in item:
+                    current_orders = item["current_orders"]
+                    
+                    # Check in pending orders
+                    for order in current_orders.get("pending_orders", []):
+                        if order.get("ticket") == ticket:
+                            return True, "pending_order"
+                    
+                    # Check in open positions
+                    for position in current_orders.get("open_positions", []):
+                        if position.get("ticket") == ticket:
+                            return True, "open_position"
+            return False, None
+        
+        print(f"    📊 Taking current orders & positions snapshot...")
+        
+        # Read existing tradeshistory.json first to check for duplicates
+        history_path = investor_root / "tradeshistory.json"
+        history = []
+        
+        if history_path.exists():
+            try:
+                with open(history_path, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+            except Exception as e:
+                print(f"    ⚠️  Error reading tradeshistory.json: {e}")
+                history = []
+        
+        # Fetch current state from MT5
+        pending_orders, open_positions = get_current_orders_from_mt5()
+        
+        # Create sets of active tickets for quick lookup
+        active_pending_tickets = {order['ticket'] for order in pending_orders}
+        active_position_tickets = {pos['ticket'] for pos in open_positions}
+        
+        print(f"    📋 Found: {len(pending_orders)} pending orders, {len(open_positions)} open positions")
+        
+        # Update status for existing records in history (not just current_orders)
+        print(f"    🔄 Updating status for existing records...")
+        
+        # Iterate through all items in history to update status
+        for item in history:
+            if isinstance(item, dict):
+                # Skip the current_orders entry for now, handle separately
+                if "current_orders" in item:
+                    continue
+                
+                ticket = item.get("ticket")
+                if ticket:
+                    if ticket in active_pending_tickets:
+                        if item.get("status") != "pending":
+                            item["status"] = "pending"
+                            print(f"       - Ticket {ticket}: status updated to 'pending'")
+                    elif ticket in active_position_tickets:
+                        if item.get("status") != "running_position":
+                            item["status"] = "running_position"
+                            print(f"       - Ticket {ticket}: status updated to 'running_position'")
+                    else:
+                        if item.get("status") != "closed":
+                            item["status"] = "closed"
+                            print(f"       - Ticket {ticket}: status updated to 'closed'")
+        
+        # Check pending orders
+        if pending_orders:
+            print(f"    🎫 Pending Orders Tickets:")
+            for order in pending_orders:
+                ticket = order['ticket']
+                exists, location = check_existing_ticket(history, ticket, "pending")
+                if exists:
+                    print(f"       - Ticket {ticket} ({order['type_name']}) - ✅ EXISTS! (in {location})")
+                else:
+                    print(f"       - Ticket {ticket} ({order['type_name']}) - 🆕 New")
+        
+        # Check open positions
+        if open_positions:
+            print(f"    💼 Open Positions Tickets:")
+            for position in open_positions:
+                ticket = position['ticket']
+                exists, location = check_existing_ticket(history, ticket, "position")
+                if exists:
+                    print(f"       - Ticket {ticket} ({position['type_name']}) - ✅ EXISTS! (in {location})")
+                else:
+                    print(f"       - Ticket {ticket} ({position['type_name']}) - 🆕 New")
+        
+        # Prepare current_orders data
+        current_orders_data = {
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'pending_orders': pending_orders,
+            'open_positions': open_positions
+        }
+        
+        # Remove any existing "current_orders" entry
+        history = [item for item in history if not isinstance(item, dict) or "current_orders" not in item]
+        
+        # Append the new current_orders entry
+        history.append({"current_orders": current_orders_data})
+        
+        # Save back to file
+        try:
+            with open(history_path, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=4)
+            
+            print(f"    ✅ Saved current orders snapshot to tradeshistory.json")
+            print(f"       - Pending orders: {len(pending_orders)}")
+            print(f"       - Open positions: {len(open_positions)}")
+            
+            return True, {
+                'pending_orders': len(pending_orders),
+                'open_positions': len(open_positions)
+            }
+            
+        except Exception as e:
+            print(f"     Error saving tradeshistory.json: {e}")
+            return False, None
+
+    # --- SUB-FUNCTION 10: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
+    def syncing_orders_and_pnl_details(investor_root, new_trade=None, original_signal_fields=None):
+        """
+        Synchronizes tradeshistory.json with MT5 terminal.
+        Stores COMPLETE order information including all signal fields.
+        Tracks running positions with unique IDs.
+        
+        NOTE: Status updates are now handled by current_pendingorders_and_positions().
+        This function ONLY adds new trades, assigns position IDs, and updates position details.
+        It does NOT change the status of existing trades.
+        """
+        try:
+            history_path = investor_root / "tradeshistory.json"
+            
+            print(f"      📂 Tradeshistory path: {history_path}")
+            
+            history = []
+            if history_path.exists():
+                try:
+                    with open(history_path, 'r', encoding='utf-8') as f:
+                        history = json.load(f)
+                    print(f"      📋 Loaded {len(history)} existing trades")
+                except Exception as e:
+                    print(f"      ⚠️  Error reading tradeshistory.json: {e}")
+                    history = []
+
+            # ========== Get CURRENT state for new trade and position ID assignment ==========
+            # Get current pending orders directly from MT5
+            active_orders = {}
+            orders = mt5.orders_get()
+            if orders:
+                for order in orders:
+                    active_orders[order.ticket] = order
+            
+            # Get current open positions directly from MT5
+            active_positions = {}
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    active_positions[pos.ticket] = pos
+            
+            print(f"      📊 MT5 Current State: {len(active_orders)} pending orders, {len(active_positions)} open positions")
+            
+            # ========== Build order-to-position mapping for reference ==========
+            order_to_position_map = {}
+            
+            if positions:
+                for pos in positions:
+                    pos_ticket = pos.ticket
+                    
+                    # Method 1: Direct match (some brokers reuse ticket)
+                    if pos_ticket in active_orders:
+                        order_to_position_map[pos_ticket] = pos_ticket
+                    
+                    # Method 2: Query history orders to find the order that created this position
+                    from_date = datetime.now() - timedelta(days=7)
+                    history_orders = mt5.history_orders_get(from_date, datetime.now())
+                    
+                    if history_orders:
+                        for hist_order in history_orders:
+                            if hasattr(hist_order, 'position_id') and hist_order.position_id == pos_ticket:
+                                order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+                            if hasattr(hist_order, 'position_by_id') and hist_order.position_by_id == pos_ticket:
+                                order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+            
+            print(f"      🔗 Order-to-Position mapping: {len(order_to_position_map)} links found")
+            
+            # Track next position ID
+            position_counter = 1
+            # Filter out non-dict entries and current_orders snapshots
+            valid_trades = [t for t in history if isinstance(t, dict) and 'current_orders' not in t]
+            existing_position_ids = [t.get('position_id') for t in valid_trades if t.get('position_id')]
+            if existing_position_ids:
+                max_id = 0
+                for pid in existing_position_ids:
+                    if pid and str(pid).startswith('POS_'):
+                        try:
+                            num = int(str(pid).split('_')[1])
+                            max_id = max(max_id, num)
+                        except (IndexError, ValueError):
+                            pass
+                position_counter = max_id + 1
+            
+            # ========== Add new trade if provided ==========
+            if new_trade:
+                existing_ticket = any(t.get('ticket') == new_trade.get('ticket') for t in valid_trades)
+                if not existing_ticket:
+                    # Preserve ALL original signal fields
+                    complete_trade_record = new_trade.copy()
+                    
+                    # Add any additional fields from original signal
+                    if original_signal_fields:
+                        for key, value in original_signal_fields.items():
+                            if key not in complete_trade_record:
+                                complete_trade_record[key] = value
+                    
+                    # Set initial status based on CURRENT MT5 state (ONLY for NEW trades)
+                    order_ticket = new_trade.get('ticket')
+                    
+                    if order_ticket in active_orders:
+                        complete_trade_record['status'] = 'pending'
+                    elif order_ticket in active_positions:
+                        complete_trade_record['status'] = 'running_position'
+                        if not complete_trade_record.get('position_id'):
+                            complete_trade_record['position_id'] = f"POS_{position_counter}"
+                            position_counter += 1
+                    elif order_ticket in order_to_position_map:
+                        position_ticket = order_to_position_map[order_ticket]
+                        if position_ticket in active_positions:
+                            complete_trade_record['status'] = 'running_position'
+                            if not complete_trade_record.get('position_id'):
+                                complete_trade_record['position_id'] = f"POS_{position_counter}"
+                                position_counter += 1
+                            complete_trade_record['position_ticket'] = position_ticket
+                    else:
+                        complete_trade_record['status'] = 'pending'  # Default for new orders
+                    
+                    history.append(complete_trade_record)
+                    print(f"      ➕ Added new trade: Ticket {new_trade.get('ticket')} with status '{complete_trade_record.get('status')}'")
+                else:
+                    print(f"      ℹ️  Trade Ticket {new_trade.get('ticket')} already exists")
+
+            # ========== FRESH FETCH for updating existing records (position details only, NO status changes) ==========
+            # Re-fetch current state to ensure we have the absolute latest data
+            fresh_active_positions = {}
+            fresh_positions = mt5.positions_get()
+            if fresh_positions:
+                for pos in fresh_positions:
+                    fresh_active_positions[pos.ticket] = pos
+            
+            # Rebuild order-to-position mapping with fresh data
+            fresh_order_to_position_map = {}
+            if fresh_positions:
+                for pos in fresh_positions:
+                    pos_ticket = pos.ticket
+                    if pos_ticket in active_orders:
+                        fresh_order_to_position_map[pos_ticket] = pos_ticket
+                    
+                    from_date = datetime.now() - timedelta(days=7)
+                    history_orders = mt5.history_orders_get(from_date, datetime.now())
+                    if history_orders:
+                        for hist_order in history_orders:
+                            if hasattr(hist_order, 'position_id') and hist_order.position_id == pos_ticket:
+                                fresh_order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+                            if hasattr(hist_order, 'position_by_id') and hist_order.position_by_id == pos_ticket:
+                                fresh_order_to_position_map[hist_order.ticket] = pos_ticket
+                                break
+            
+            # Also get history deals for closure data (profit/commission/swap)
+            from_date = datetime.now() - timedelta(days=7)
+            history_deals = mt5.history_deals_get(from_date, datetime.now()) or []
+            
+            # Build deal lookup by order ticket and position ticket
+            deals_by_order = {}
+            deals_by_position = {}
+            for deal in history_deals:
+                if hasattr(deal, 'order') and deal.order:
+                    if deal.order not in deals_by_order:
+                        deals_by_order[deal.order] = []
+                    deals_by_order[deal.order].append(deal)
+                if hasattr(deal, 'position_id') and deal.position_id:
+                    if deal.position_id not in deals_by_position:
+                        deals_by_position[deal.position_id] = []
+                    deals_by_position[deal.position_id].append(deal)
+            
+            # ========== Update existing records (position details, IDs, P&L - NO STATUS CHANGES) ==========
+            updated_count = 0            
+            for idx, trade in enumerate(history):
+                # Skip the current_orders snapshot entry
+                if isinstance(trade, dict) and 'current_orders' in trade:
+                    continue
+                    
+                ticket = trade.get('ticket')
+                if not ticket:
+                    continue
+                
+                needs_update = False
+                
+                # ========== ONLY update position details for running positions ==========
+                # We do NOT change the status field - that's handled by current_pendingorders_and_positions()
+                
+                # Check if this ticket is currently an open position (Direct match)
+                if ticket in fresh_active_positions:
+                    position = fresh_active_positions[ticket]
+                    
+                    # Assign position ID if not already assigned
+                    if not trade.get('position_id'):
+                        trade['position_id'] = f"POS_{position_counter}"
+                        position_counter += 1
+                        needs_update = True
+                        print(f"      🆔 Assigned position ID {trade['position_id']} to ticket {ticket}")
+                    
+                    # Update position details (prices, profits, etc.)
+                    trade['current_price'] = position.price_current
+                    trade['current_profit'] = position.profit
+                    trade['open_time'] = datetime.fromtimestamp(position.time).strftime('%Y-%m-%d %H:%M:%S')
+                    trade['open_price'] = position.price_open
+                    trade['volume_current'] = position.volume
+                    trade['current_swap'] = position.swap if hasattr(position, 'swap') else 0
+                    trade['position_ticket'] = position.ticket
+                    
+                    if hasattr(position, 'commission'):
+                        trade['current_commission'] = position.commission
+                    
+                    needs_update = True
+                    
+                # Check if this ticket is mapped to an active position
+                elif ticket in fresh_order_to_position_map:
+                    position_ticket = fresh_order_to_position_map[ticket]
+                    if position_ticket in fresh_active_positions:
+                        position = fresh_active_positions[position_ticket]
+                        
+                        # Assign position ID if not already assigned
+                        if not trade.get('position_id'):
+                            trade['position_id'] = f"POS_{position_counter}"
+                            position_counter += 1
+                            needs_update = True
+                            print(f"      🆔 Assigned position ID {trade['position_id']} to ticket {ticket} (position: {position_ticket})")
+                        
+                        # Update position details
+                        trade['current_price'] = position.price_current
+                        trade['current_profit'] = position.profit
+                        trade['open_time'] = datetime.fromtimestamp(position.time).strftime('%Y-%m-%d %H:%M:%S')
+                        trade['open_price'] = position.price_open
+                        trade['volume_current'] = position.volume
+                        trade['current_swap'] = position.swap if hasattr(position, 'swap') else 0
+                        trade['position_ticket'] = position_ticket
+                        
+                        if hasattr(position, 'commission'):
+                            trade['current_commission'] = position.commission
+                        
+                        needs_update = True
+                
+                # ========== Update closed position P&L data (but NOT the status) ==========
+                # Only update financial data for positions that already have 'closed' status
+                if trade.get('status') == 'closed':
+                    # Check deals by order ticket
+                    related_deals = deals_by_order.get(ticket, [])
+                    
+                    # Also check deals by position ticket (if we have one stored)
+                    position_ticket = trade.get('position_ticket')
+                    if position_ticket and position_ticket in deals_by_position:
+                        related_deals.extend(deals_by_position[position_ticket])
+                    
+                    if related_deals:
+                        # Calculate totals from deals
+                        total_profit = 0
+                        total_commission = 0
+                        total_swap = 0
+                        close_price = None
+                        close_time = None
+                        close_reason = None
+                        
+                        for deal in related_deals:
+                            if hasattr(deal, 'profit'):
+                                total_profit += deal.profit
+                            if hasattr(deal, 'commission'):
+                                total_commission += deal.commission
+                            if hasattr(deal, 'swap'):
+                                total_swap += deal.swap
+                            if hasattr(deal, 'price') and deal.price > 0:
+                                close_price = deal.price
+                                close_time = datetime.fromtimestamp(deal.time).strftime('%Y-%m-%d %H:%M:%S')
+                            if hasattr(deal, 'comment') and deal.comment:
+                                close_reason = deal.comment
+                        
+                        # Update financial data if changed
+                        current_profit = trade.get('profit', 0)
+                        current_commission = trade.get('commission', 0)
+                        current_swap = trade.get('swap', 0)
+                        
+                        if (current_profit != total_profit or 
+                            current_commission != total_commission or 
+                            current_swap != total_swap):
+                            
+                            trade['profit'] = total_profit
+                            trade['commission'] = total_commission
+                            trade['swap'] = total_swap
+                            trade['total_pnl'] = total_profit + total_commission + total_swap
+                            
+                            if close_price and not trade.get('close_price'):
+                                trade['close_price'] = close_price
+                            if close_time and not trade.get('close_time'):
+                                trade['close_time'] = close_time
+                            if close_reason and not trade.get('close_reason'):
+                                trade['close_reason'] = close_reason
+                            
+                            needs_update = True
+                
+                if needs_update:
+                    updated_count += 1
+            
+            # Second pass: ensure all running positions have position_id
+            for trade in history:
+                if isinstance(trade, dict) and 'current_orders' not in trade:
+                    if trade.get('status') == 'running_position' and not trade.get('position_id'):
+                        trade['position_id'] = f"POS_{position_counter}"
+                        position_counter += 1
+                        updated_count += 1
+                        print(f"      🆔 Assigned position ID {trade['position_id']} to running position ticket {trade.get('ticket')}")
+            
+            # Third pass: calculate total P&L for closed positions if not already calculated
+            for trade in history:
+                if isinstance(trade, dict) and 'current_orders' not in trade:
+                    if trade.get('status') == 'closed' and 'total_pnl' not in trade:
+                        profit = trade.get('profit', 0)
+                        commission = trade.get('commission', 0)
+                        swap = trade.get('swap', 0)
+                        trade['total_pnl'] = profit + commission + swap
+                        updated_count += 1
+
+            # Save updated history
+            with open(history_path, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=4)
+            
+            if new_trade:
+                print(f"      ✅ Saved new trade to tradeshistory.json")
+            elif updated_count > 0:
+                print(f"      ✅ Updated {updated_count} trades in tradeshistory.json (position details, IDs, P&L)")
+            else:
+                print(f"      ✅ No updates needed")
+            
+            # Save backup
+            backup_path = investor_root / "tradeshistory_backup.json"
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=4)
+            
+            # Return statistics (counts based on CURRENT statuses)
+            running_count = sum(1 for t in history if isinstance(t, dict) and 'current_orders' not in t and t.get('status') == 'running_position')
+            pending_count = sum(1 for t in history if isinstance(t, dict) and 'current_orders' not in t and t.get('status') == 'pending')
+            closed_count = sum(1 for t in history if isinstance(t, dict) and 'current_orders' not in t and t.get('status') == 'closed')
+            
+            print(f"      📊 Current status counts: {running_count} running, {pending_count} pending, {closed_count} closed")
+            
+            return True, {
+                'running_positions': running_count,
+                'pending_orders': pending_count,
+                'closed_trades': closed_count,
+                'last_position_id': position_counter - 1
+            }
+            
+        except Exception as e:
+            print(f"       Error in sync_and_save_history: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, None
+    
+    # --- SUB-FUNCTION 11: CHECK IF SYMBOL IS TRADEABLE ---
+    def is_symbol_tradeable(symbol):
+        """
+        Check if a symbol exists AND trading is enabled.
+        Returns True if tradeable, False otherwise.
+        """
+        # Check if symbol exists
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            # Try to select it
+            if mt5.symbol_select(symbol, True):
+                symbol_info = mt5.symbol_info(symbol)
+        
+        if symbol_info is None:
+            return False
+        
+        # Check if trading is enabled
+        if hasattr(symbol_info, 'trade_mode') and symbol_info.trade_mode == 0:
+            return False
+        
+        # Check contract size
+        if hasattr(symbol_info, 'trade_contract_size') and symbol_info.trade_contract_size <= 0:
+            return False
+        
+        # Check if we can get a valid tick
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None or (tick.ask == 0 and tick.bid == 0):
+            return False
+        
+        return True
+
+    # --- SUB-FUNCTION 12: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
+    def find_tradeable_symbol_with_retry(base_symbol, resolution_cache):
+        """
+        Try ALL suffixes one after another until a tradeable symbol is found.
+        Returns (tradeable_symbol, used_suffix) or (None, None) if none found.
+        """
+        # Check cache first
+        cache_key = f"tradeable_{base_symbol}"
+        if cache_key in resolution_cache:
+            cached_result = resolution_cache[cache_key]
+            if cached_result is None:
+                return None, None
+            return cached_result, resolution_cache.get(f"suffix_{base_symbol}", "")
+        
+        print(f"        🔍 Searching for tradeable symbol for '{base_symbol}'...")
+        
+        # Try each suffix in order
+        for idx, suffix in enumerate(SYMBOL_SUFFIXES):
+            test_symbol = base_symbol + suffix if suffix else base_symbol
+            
+            # Skip if we already know this exact symbol is not tradeable
+            symbol_cache_key = f"checked_{test_symbol}"
+            if symbol_cache_key in resolution_cache and not resolution_cache[symbol_cache_key]:
+                continue
+            
+            print(f"          Trying: {test_symbol} (suffix {idx+1}/{len(SYMBOL_SUFFIXES)})")
+            
+            # Check if this symbol is tradeable
+            if is_symbol_tradeable(test_symbol):
+                print(f"          ✅ SUCCESS! {test_symbol} IS TRADEABLE!")
+                resolution_cache[cache_key] = test_symbol
+                resolution_cache[f"suffix_{base_symbol}"] = suffix
+                resolution_cache[symbol_cache_key] = True
+                return test_symbol, suffix
+            else:
+                resolution_cache[symbol_cache_key] = False
+        
+        # No tradeable symbol found
+        print(f"         FAILED: No tradeable symbol found for '{base_symbol}' after trying {len(SYMBOL_SUFFIXES)} suffixes")
+        resolution_cache[cache_key] = None
+        return None, None
+
+    # --- SUB-FUNCTION 13: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
+    def collect_orders_from_signals(investor_root, resolution_cache):
+        """
+        Collect all orders from limit_orders.json files in ALL strategy subfolders.
+        PRESERVES ALL FIELDS from the original signal for later recording.
+        Separates hedge orders from regular orders.
+        """
+        entries_with_paths = []
+        hedge_entries = []
+        regular_entries = []
+        
+        # Find ALL limit_orders.json files in any subfolder of investor_root
+        signals_files = list(investor_root.rglob("limit_orders.json"))
+        
+        if not signals_files:
+            print(f"    ℹ️  No limit_orders.json files found in {investor_root} or its subfolders")
+            return [], [], []
+        
+        print(f"    📁 Found {len(signals_files)} limit_orders.json files in strategy folders:")
+        
+        for signals_path in signals_files:
+            # Extract strategy name from parent folder
+            strategy_name = signals_path.parent.name
+            print(f"       • Strategy: {strategy_name} - {signals_path}")
+            
+            try:
+                with open(signals_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                if not data:
+                    print(f"         ⚠️  Empty limit_orders.json file")
+                    continue
+                
+                print(f"         📡 Found {len(data)} signals")
+                
+                for entry in data:
+                    # Check if this is a hedge order
+                    is_hedge = entry.get('is_hedge_order', False)
+                    
+                    # Get the raw symbol exactly as specified in the JSON
+                    raw_symbol = entry.get("symbol", "")
+                    
+                    # Find tradeable symbol by trying ALL suffixes
+                    tradeable_symbol, used_suffix = find_tradeable_symbol_with_retry(raw_symbol, resolution_cache)
+                    
+                    if tradeable_symbol is None:
+                        print(f"         ⚠️  Cannot find ANY tradeable symbol for '{raw_symbol}' - skipping signal")
+                        continue
+                    
+                    # Create a copy of the original entry with ALL fields preserved
+                    enhanced_entry = entry.copy()
+                    
+                    # Update symbol fields
+                    enhanced_entry['symbol'] = tradeable_symbol
+                    enhanced_entry['strategy_name'] = strategy_name
+                    enhanced_entry['original_symbol'] = raw_symbol
+                    enhanced_entry['used_suffix'] = used_suffix if used_suffix else "none"
+                    enhanced_entry['suffix_applied'] = used_suffix if used_suffix else "original"
+                    enhanced_entry['signals_path'] = str(signals_path)  # Store path for removal if needed
+                    
+                    # Store the complete original entry for later reference
+                    enhanced_entry['_original_signal'] = entry.copy()
+                    
+                    wrapper = {
+                        'data': enhanced_entry,
+                        'path': signals_path,
+                        'strategy': strategy_name,
+                        'original_signal': entry,  # Keep original for field preservation
+                        'is_hedge': is_hedge
+                    }
+                    
+                    entries_with_paths.append(wrapper)
+                    
+                    if is_hedge:
+                        hedge_entries.append(wrapper)
+                        print(f"            🛡️ HEDGE ORDER: {tradeable_symbol} - {entry.get('order_type')} (will ALWAYS be placed)")
+                    else:
+                        regular_entries.append(wrapper)
+                        print(f"            📊 REGULAR ORDER: {tradeable_symbol} - {entry.get('order_type')} (will follow uniqueness rules)")
+                    
+                    if used_suffix:
+                        print(f"               ✅ Using tradeable symbol: {tradeable_symbol} (original: {raw_symbol}, added suffix: '{used_suffix}')")
+                    else:
+                        print(f"               ✅ Using tradeable symbol: {tradeable_symbol} (original: {raw_symbol})")
+                    
+            except json.JSONDecodeError as e:
+                print(f"          Invalid JSON in {signals_path}: {e}")
+                continue
+            except Exception as e:
+                print(f"         ⚠️  Error reading {signals_path}: {e}")
+                continue
+        
+        print(f"    📡 Total signals collected: {len(entries_with_paths)} (Hedge: {len(hedge_entries)}, Regular: {len(regular_entries)})")
+        return entries_with_paths, hedge_entries, regular_entries
+
+    # --- SUB-FUNCTION 14: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
+
+    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal, skip_proximity_check, switch_invalid_to_instant=False):
+        """
+        Execute a single order based on its order_type.
+        PRESERVES ALL FIELDS from original signal for tradeshistory.
+        REMOVES CANDLE TIME RECORD IF ORDER PLACEMENT FAILS.
+        
+        Args:
+            skip_proximity_check: If True, skips proximity risk check entirely
+            switch_invalid_to_instant: If True, converts invalid stop orders to instant market orders
+        """
+        
+        # --- SUB-FUNCTION: GET SUPPORTED FILLING MODES ---
+        def get_supported_filling_modes(symbol_info, is_pending_order=False):
+            """
+            Determine supported filling modes for a symbol based on its properties.
+            Returns list of filling modes to try in order of preference.
+            
+            Args:
+                symbol_info: MT5 symbol info object
+                is_pending_order: True for pending orders, False for market orders
+            
+            Returns:
+                list: List of filling mode constants to try
+            """
+            if is_pending_order:
+                # For pending orders, most brokers only support RETURN mode
+                # Some brokers don't support any filling mode for pending orders
+                return [mt5.ORDER_FILLING_RETURN]
+            
+            # For market orders, check symbol properties
+            execution_mode = symbol_info.trade_exemode
+            filling_mode_mask = symbol_info.filling_mode
+            
+            # Debug output
+            print(f"        📋 Symbol filling mode mask: {filling_mode_mask}")
+            print(f"        📋 Execution mode: {execution_mode}")
+            
+            # SYMBOL_FILLING flags
+            SYMBOL_FILLING_FOK = 0x01  # Fill or Kill
+            SYMBOL_FILLING_IOC = 0x02  # Immediate or Cancel
+            SYMBOL_FILLING_BOC = 0x04  # Book or Cancel (since build 3800)
+            
+            filling_modes = []
+            
+            # Strategy 1: For Exchange Execution, try BOC, IOC, FOK
+            if execution_mode == mt5.SYMBOL_TRADE_EXECUTION_EXCHANGE:
+                if filling_mode_mask & SYMBOL_FILLING_BOC:
+                    filling_modes.append(mt5.ORDER_FILLING_BOC)
+                if filling_mode_mask & SYMBOL_FILLING_IOC:
+                    filling_modes.append(mt5.ORDER_FILLING_IOC)
+                if filling_mode_mask & SYMBOL_FILLING_FOK:
+                    filling_modes.append(mt5.ORDER_FILLING_FOK)
+                # Always add RETURN as fallback
+                filling_modes.append(mt5.ORDER_FILLING_RETURN)
+            
+            # Strategy 2: For Market Execution, try IOC first, then RETURN
+            elif execution_mode == mt5.SYMBOL_TRADE_EXECUTION_MARKET:
+                if filling_mode_mask & SYMBOL_FILLING_IOC:
+                    filling_modes.append(mt5.ORDER_FILLING_IOC)
+                # Some brokers with Market Execution work better with RETURN
+                filling_modes.append(mt5.ORDER_FILLING_RETURN)
+                if filling_mode_mask & SYMBOL_FILLING_FOK:
+                    filling_modes.append(mt5.ORDER_FILLING_FOK)
+            
+            # Strategy 3: For Instant/Request Execution, try FOK
+            elif execution_mode in [mt5.SYMBOL_TRADE_EXECUTION_INSTANT, mt5.SYMBOL_TRADE_EXECUTION_REQUEST]:
+                if filling_mode_mask & SYMBOL_FILLING_FOK:
+                    filling_modes.append(mt5.ORDER_FILLING_FOK)
+                filling_modes.append(mt5.ORDER_FILLING_RETURN)
+            
+            # Strategy 4: Unknown execution mode - try common modes
+            else:
+                filling_modes = [
+                    mt5.ORDER_FILLING_IOC,
+                    mt5.ORDER_FILLING_FOK,
+                    mt5.ORDER_FILLING_RETURN
+                ]
+            
+            # Remove duplicates while preserving order
+            unique_modes = []
+            for mode in filling_modes:
+                if mode not in unique_modes:
+                    unique_modes.append(mode)
+            
+            print(f"        📋 Will try filling modes in order: {unique_modes}")
+            return unique_modes
+        
+        # --- SUB-FUNCTION: SEND ORDER WITH AUTO FILLING MODE RETRY ---
+        def send_order_with_auto_filling(request_template, filling_modes, is_pending_order=False):
+            """
+            Send order with automatic retry using different filling modes.
+            
+            Args:
+                request_template: Base request dictionary (without type_filling)
+                filling_modes: List of filling modes to try
+                is_pending_order: True for pending orders
+            
+            Returns:
+                tuple: (result, used_filling_mode, error_message)
+            """
+            for filling_mode in filling_modes:
+                # Create request copy with current filling mode
+                request = request_template.copy()
+                request["type_filling"] = filling_mode
+                
+                # For pending orders, ensure action is PENDING
+                if is_pending_order:
+                    request["action"] = mt5.TRADE_ACTION_PENDING
+                else:
+                    request["action"] = mt5.TRADE_ACTION_DEAL
+                
+                # Send order
+                result = mt5.order_send(request)
+                
+                # Check if successful
+                if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    print(f"        ✅ Order successful with filling mode: {filling_mode}")
+                    return result, filling_mode, None
+                
+                # Check if we should try next filling mode
+                if result is not None and result.retcode == 10009:  # Unsupported filling mode
+                    print(f"        ⚠️  Filling mode {filling_mode} not supported, trying next...")
+                    continue
+                elif result is not None and result.retcode != mt5.TRADE_RETCODE_DONE:
+                    # Other error - don't retry, return the error
+                    return result, filling_mode, f"Order failed: {result.comment} (code: {result.retcode})"
+            
+            # All filling modes failed
+            return None, None, "All filling modes failed"
+        
+        # --- SUB-FUNCTION: HANDLE INVALID PRICE CONVERSION ---
+        def should_convert_to_instant(order_type, current_price, entry_price, exit_price, current_opposite_price=None):
+            """
+            Determine if a stop order should be converted to instant market order.
+            
+            Args:
+                order_type: The order type (buy_stop, sell_stop, etc.)
+                current_price: Current market price (ask for buy_stop, bid for sell_stop)
+                entry_price: The requested entry price
+                exit_price: The stop loss price (SL)
+                current_opposite_price: Current opposite price (bid for buy_stop, ask for sell_stop)
+                
+            Returns:
+                tuple: (should_convert, instant_order_type, reason, error_details)
+            """
+            if not switch_invalid_to_instant:
+                return False, None, None, None
+            
+            order_type_lower = order_type.lower()
+            
+            # Only process stop orders
+            if order_type_lower not in ['buy_stop', 'sell_stop']:
+                return False, None, None, None
+            
+            # For BUY_STOP: Entry price should be ABOVE current price
+            if order_type_lower == 'buy_stop':
+                price_difference = entry_price - current_price
+                
+                # Case 1: Entry price is BELOW current price - "too close from below" or "below current price"
+                if entry_price < current_price:
+                    # Check if current price is above the stop loss
+                    if exit_price and exit_price > 0 and current_price <= exit_price:
+                        print(f"             CANNOT CONVERT: Current ASK price ({current_price}) is NOT above SL ({exit_price})")
+                        print(f"               - Instant buy would violate stop loss protection")
+                        return False, None, 'current_price_not_above_sl', {
+                            'reason': f'Current ASK price ({current_price}) is not above stop loss ({exit_price})',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'exit_price': exit_price,
+                            'requirement': 'current_price > exit_price for instant buy conversion'
+                        }
+                    
+                    error_details = {
+                        'reason': f'BUY_STOP entry price is BELOW current market price (too close from below)',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'price_difference': price_difference,
+                        'difference_pips': abs(price_difference) * (10000 if current_price < 100 else 1),
+                        'violation_type': 'price_below_current',
+                        'description': f'The entry price {entry_price} is BELOW the current ASK price {current_price}. For a BUY_STOP order, the entry price MUST be ABOVE the current market price.'
+                    }
+                    print(f"            🔄 INVALID BUY_STOP detected - Price is BELOW current market (too close from below):")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current ASK price: {current_price}")
+                    print(f"               - Distance: {abs(price_difference):.5f} ({abs(price_difference) * 10000:.1f} pips below)")
+                    print(f"            🔄 Converting to INSTANT BUY at market price (current ASK: {current_price})")
+                    return True, 'instant_buy', 'price_below_current', error_details
+                
+                # Case 2: Entry price is EQUAL to current price
+                elif entry_price == current_price:
+                    error_details = {
+                        'reason': f'BUY_STOP entry price is EQUAL to current market price',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current ASK price {current_price}. For a BUY_STOP order, the entry price MUST be ABOVE the current market price.'
+                    }
+                    print(f"            🔄 INVALID BUY_STOP detected - Price is EQUAL to current market:")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current ASK price: {current_price}")
+                    print(f"            🔄 Converting to INSTANT BUY at market price (current ASK: {current_price})")
+                    return True, 'instant_buy', 'price_equal_current', error_details
+                
+                # Case 3: Entry price is ABOVE current price but too close
+                elif entry_price > current_price:
+                    points_above = (entry_price - current_price) / symbol_info.point if symbol_info.point > 0 else 0
+                    if points_above < 10:  # Too close from above
+                        error_details = {
+                            'reason': f'BUY_STOP entry price is too close from above (only {points_above:.1f} points above)',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'points_above': points_above,
+                            'minimum_points': 10,
+                            'violation_type': 'too_close_from_above',
+                            'description': f'The entry price {entry_price} is only {points_above:.1f} points ABOVE the current ASK price {current_price}. Minimum distance required is 10 points.'
+                        }
+                        print(f"            ⚠️  BUY_STOP too close from above detected:")
+                        print(f"               - Entry price: {entry_price}")
+                        print(f"               - Current ASK price: {current_price}")
+                        print(f"               - Distance: {points_above:.1f} points above (minimum required: 10 points)")
+                        print(f"            🔄 Converting to INSTANT BUY at market price")
+                        
+                        # Check stop loss condition
+                        if exit_price and exit_price > 0 and current_price <= exit_price:
+                            print(f"             CANNOT CONVERT: Current ASK price ({current_price}) is NOT above SL ({exit_price})")
+                            return False, None, 'current_price_not_above_sl', {
+                                'reason': f'Current ASK price ({current_price}) is not above stop loss ({exit_price})'
+                            }
+                        
+                        return True, 'instant_buy', 'too_close_from_above', error_details
+                    else:
+                        # Valid BUY_STOP - no conversion needed
+                        return False, None, None, None
+            
+            # For SELL_STOP: Entry price should be BELOW current price
+            elif order_type_lower == 'sell_stop':
+                price_difference = current_price - entry_price
+                
+                # Case 1: Entry price is ABOVE current price - "too close from above" or "above current price"
+                if entry_price > current_price:
+                    # Check if current price is below the stop loss
+                    if exit_price and exit_price > 0 and current_price >= exit_price:
+                        print(f"             CANNOT CONVERT: Current BID price ({current_price}) is NOT below SL ({exit_price})")
+                        print(f"               - Instant sell would violate stop loss protection")
+                        return False, None, 'current_price_not_below_sl', {
+                            'reason': f'Current BID price ({current_price}) is not below stop loss ({exit_price})',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'exit_price': exit_price,
+                            'requirement': 'current_price < exit_price for instant sell conversion'
+                        }
+                    
+                    error_details = {
+                        'reason': f'SELL_STOP entry price is ABOVE current market price (too close from above)',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'price_difference': price_difference,
+                        'difference_pips': abs(price_difference) * (10000 if current_price < 100 else 1),
+                        'violation_type': 'price_above_current',
+                        'description': f'The entry price {entry_price} is ABOVE the current BID price {current_price}. For a SELL_STOP order, the entry price MUST be BELOW the current market price.'
+                    }
+                    print(f"            🔄 INVALID SELL_STOP detected - Price is ABOVE current market (too close from above):")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current BID price: {current_price}")
+                    print(f"               - Distance: {abs(entry_price - current_price):.5f} ({abs(entry_price - current_price) * 10000:.1f} pips above)")
+                    print(f"            🔄 Converting to INSTANT SELL at market price (current BID: {current_price})")
+                    return True, 'instant_sell', 'price_above_current', error_details
+                
+                # Case 2: Entry price is EQUAL to current price
+                elif entry_price == current_price:
+                    error_details = {
+                        'reason': f'SELL_STOP entry price is EQUAL to current market price',
+                        'entry_price': entry_price,
+                        'current_price': current_price,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current BID price {current_price}. For a SELL_STOP order, the entry price MUST be BELOW the current market price.'
+                    }
+                    print(f"            🔄 INVALID SELL_STOP detected - Price is EQUAL to current market:")
+                    print(f"               - Entry price: {entry_price}")
+                    print(f"               - Current BID price: {current_price}")
+                    print(f"            🔄 Converting to INSTANT SELL at market price (current BID: {current_price})")
+                    return True, 'instant_sell', 'price_equal_current', error_details
+                
+                # Case 3: Entry price is BELOW current price but too close
+                elif entry_price < current_price:
+                    points_below = (current_price - entry_price) / symbol_info.point if symbol_info.point > 0 else 0
+                    if points_below < 10:  # Too close from below
+                        error_details = {
+                            'reason': f'SELL_STOP entry price is too close from below (only {points_below:.1f} points below)',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'points_below': points_below,
+                            'minimum_points': 10,
+                            'violation_type': 'too_close_from_below',
+                            'description': f'The entry price {entry_price} is only {points_below:.1f} points BELOW the current BID price {current_price}. Minimum distance required is 10 points.'
+                        }
+                        print(f"            ⚠️  SELL_STOP too close from below detected:")
+                        print(f"               - Entry price: {entry_price}")
+                        print(f"               - Current BID price: {current_price}")
+                        print(f"               - Distance: {points_below:.1f} points below (minimum required: 10 points)")
+                        print(f"            🔄 Converting to INSTANT SELL at market price")
+                        
+                        # Check stop loss condition
+                        if exit_price and exit_price > 0 and current_price >= exit_price:
+                            print(f"             CANNOT CONVERT: Current BID price ({current_price}) is NOT below SL ({exit_price})")
+                            return False, None, 'current_price_not_below_sl', {
+                                'reason': f'Current BID price ({current_price}) is not below stop loss ({exit_price})'
+                            }
+                        
+                        return True, 'instant_sell', 'too_close_from_below', error_details
+                    else:
+                        # Valid SELL_STOP - no conversion needed
+                        return False, None, None, None
+            
+            return False, None, None, None
+        
+        # --- SUB-FUNCTION: VALIDATE ORDER PRICE BEFORE SENDING ---
+        def validate_order_price(order_type, entry_price, current_ask, current_bid, symbol_info, tick):
+            """
+            Comprehensive pre-validation of order price with clear word-based messages.
+            Returns (is_valid, error_message, details_dict)
+            """
+            order_type_lower = order_type.lower()
+            
+            # Get point value for precise calculations
+            point = symbol_info.point
+            digits = symbol_info.digits
+            
+            # For market orders, no price validation needed beyond tick availability
+            if order_type_lower in ['instant_buy', 'instant_sell']:
+                if order_type_lower == 'instant_buy' and (current_ask is None or current_ask <= 0):
+                    return False, "No valid ASK price available for market buy", {'current_ask': current_ask}
+                if order_type_lower == 'instant_sell' and (current_bid is None or current_bid <= 0):
+                    return False, "No valid BID price available for market sell", {'current_bid': current_bid}
+                return True, None, None
+            
+            # Validate pending order prices
+            if order_type_lower == 'buy_stop':
+                points_above = (entry_price - current_ask) / point if point > 0 else 0
+                
+                if entry_price < current_ask:
+                    return False, f"BUY_STOP entry price is BELOW current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'difference': entry_price - current_ask,
+                        'difference_points': points_above,
+                        'violation_type': 'price_below_current',
+                        'description': f'The entry price {entry_price} is BELOW the current ASK price {current_ask}'
+                    }
+                elif entry_price == current_ask:
+                    return False, f"BUY_STOP entry price is EQUAL to current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current ASK price {current_ask}'
+                    }
+                elif points_above < 10:
+                    return False, f"BUY_STOP entry price is too close from above (only {points_above:.1f} points above current ASK)", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'points_above': points_above,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_above',
+                        'description': f'The entry price is only {points_above:.1f} points ABOVE the current ASK price. Minimum distance is 10 points.'
+                    }
+                    
+            elif order_type_lower == 'sell_stop':
+                points_below = (current_bid - entry_price) / point if point > 0 else 0
+                
+                if entry_price > current_bid:
+                    return False, f"SELL_STOP entry price is ABOVE current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'difference': entry_price - current_bid,
+                        'difference_points': points_below,
+                        'violation_type': 'price_above_current',
+                        'description': f'The entry price {entry_price} is ABOVE the current BID price {current_bid}'
+                    }
+                elif entry_price == current_bid:
+                    return False, f"SELL_STOP entry price is EQUAL to current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current BID price {current_bid}'
+                    }
+                elif points_below < 10:
+                    return False, f"SELL_STOP entry price is too close from below (only {points_below:.1f} points below current BID)", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'points_below': points_below,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_below',
+                        'description': f'The entry price is only {points_below:.1f} points BELOW the current BID price. Minimum distance is 10 points.'
+                    }
+            
+            elif order_type_lower == 'buy_limit':
+                points_below = (current_ask - entry_price) / point if point > 0 else 0
+                
+                if entry_price > current_ask:
+                    return False, f"BUY_LIMIT entry price is ABOVE current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'violation_type': 'price_above_current',
+                        'description': f'The entry price {entry_price} is ABOVE the current ASK price {current_ask}'
+                    }
+                elif entry_price == current_ask:
+                    return False, f"BUY_LIMIT entry price is EQUAL to current ASK price", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current ASK price {current_ask}'
+                    }
+                elif points_below < 10:
+                    return False, f"BUY_LIMIT entry price is too close from above (only {points_below:.1f} points below current ASK)", {
+                        'entry': entry_price,
+                        'current': current_ask,
+                        'points_below': points_below,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_above',
+                        'description': f'The entry price is only {points_below:.1f} points BELOW the current ASK price. Minimum distance is 10 points.'
+                    }
+            
+            elif order_type_lower == 'sell_limit':
+                points_above = (entry_price - current_bid) / point if point > 0 else 0
+                
+                if entry_price < current_bid:
+                    return False, f"SELL_LIMIT entry price is BELOW current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'violation_type': 'price_below_current',
+                        'description': f'The entry price {entry_price} is BELOW the current BID price {current_bid}'
+                    }
+                elif entry_price == current_bid:
+                    return False, f"SELL_LIMIT entry price is EQUAL to current BID price", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'violation_type': 'price_equal_current',
+                        'description': f'The entry price {entry_price} is EQUAL to the current BID price {current_bid}'
+                    }
+                elif points_above < 10:
+                    return False, f"SELL_LIMIT entry price is too close from below (only {points_above:.1f} points above current BID)", {
+                        'entry': entry_price,
+                        'current': current_bid,
+                        'points_above': points_above,
+                        'minimum_points': 10,
+                        'violation_type': 'too_close_from_below',
+                        'description': f'The entry price is only {points_above:.1f} points ABOVE the current BID price. Minimum distance is 10 points.'
+                    }
+            
+            return True, None, None
+        
+        symbol = order_data.get('symbol')
+        order_type = order_data.get('order_type', '').lower()
+        entry_price = float(order_data.get('entry', 0))
+        exit_price = float(order_data.get('exit', 0)) if order_data.get('exit') else 0
+        target_price = float(order_data.get('target', 0)) if order_data.get('target') else 0
+        volume = get_volume_from_signal(order_data)
+        magic_number = int(order_data.get('magic', int(investor_root.name) if investor_root.name.isdigit() else 123456))
+        strategy_name = order_data.get('strategy_name', 'unknown')
+        timeframe = order_data.get('timeframe', '')
+        current_candle_time = order_data.get('current_candle_time', '')
+        signals_path = order_data.get('signals_path', '')
+        is_hedge = order_data.get('is_hedge_order', False)
+        
+        # Get symbol info - use exact symbol name
+        if not mt5.symbol_select(symbol, True):
+            error_msg = f"Failed to select symbol {symbol}"
+            print(f"         {error_msg}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to symbol selection failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, None
+        
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            error_msg = f"Cannot get symbol info for {symbol}"
+            print(f"         {error_msg}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to symbol info failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, None
+        
+        # Get current market prices for validation
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            error_msg = f"Cannot get tick for {symbol}"
+            print(f"         {error_msg}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to tick retrieval failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, None
+        
+        current_ask = tick.ask
+        current_bid = tick.bid
+        
+        # --- CHECK AND HANDLE INVALID PRICE CONVERSION (with enhanced logic) ---
+        original_order_type = order_type
+        
+        # Get the appropriate current price based on order type
+        current_price_for_conversion = current_ask if order_type == 'buy_stop' else current_bid
+        opposite_price = current_bid if order_type == 'buy_stop' else current_ask
+        
+        should_convert, instant_type, conversion_reason, conversion_error_details = should_convert_to_instant(
+            order_type, 
+            current_price_for_conversion, 
+            entry_price,
+            exit_price,
+            opposite_price
+        )
+        
+        if should_convert:
+            # Check stop loss condition before converting
+            if order_type == 'buy_stop' and exit_price and exit_price > 0:
+                if current_ask <= exit_price:
+                    print(f"             INSTANT BUY CONVERSION REJECTED: Current ASK ({current_ask}) is not above SL ({exit_price})")
+                    print(f"               - Would violate stop loss protection")
+                    if timeframe and current_candle_time:
+                        remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+                    return False, None, f"Conversion blocked: current price not above stop loss", None
+            
+            elif order_type == 'sell_stop' and exit_price and exit_price > 0:
+                if current_bid >= exit_price:
+                    print(f"             INSTANT SELL CONVERSION REJECTED: Current BID ({current_bid}) is not below SL ({exit_price})")
+                    print(f"               - Would violate stop loss protection")
+                    if timeframe and current_candle_time:
+                        remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+                    return False, None, f"Conversion blocked: current price not below stop loss", None
+            
+            # Convert to instant market order
+            order_type = instant_type
+            print(f"            ✅ Converted {original_order_type.upper()} to {instant_type.upper()}")
+            print(f"               Original entry: {entry_price} | Current price: {current_ask if 'buy' in instant_type else current_bid}")
+            if conversion_error_details:
+                print(f"               Conversion reason: {conversion_error_details.get('reason', conversion_reason)}")
+                if 'description' in conversion_error_details:
+                    print(f"               {conversion_error_details['description']}")
+        
+        # --- PRE-VALIDATION: Check if price is valid BEFORE sending to MT5 ---
+        print(f"        🔍 Pre-validating {order_type.upper()} order...")
+        is_valid, validation_error, validation_details = validate_order_price(
+            order_type, entry_price, current_ask, current_bid, symbol_info, tick
+        )
+        
+        if not is_valid and not should_convert:
+            print(f"         PRICE VALIDATION FAILED: {validation_error}")
+            if validation_details:
+                print(f"           Details:")
+                for key, value in validation_details.items():
+                    if key != 'description':
+                        print(f"             - {key}: {value}")
+                if 'description' in validation_details:
+                    print(f"           {validation_details['description']}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to validation failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, validation_error, None
+        
+        print(f"        ✅ Price validation passed")
+        
+        # Round values to symbol digits
+        entry_price = round(entry_price, symbol_info.digits)
+        exit_price = round(exit_price, symbol_info.digits) if exit_price else 0
+        target_price = round(target_price, symbol_info.digits) if target_price else 0
+        volume = max(symbol_info.volume_min, min(symbol_info.volume_max, round(volume, 2)))
+        
+        # Get MT5 order type constant
+        mt5_order_type = get_mt5_order_type(order_type)
+        if mt5_order_type is None:
+            error_msg = f"Invalid order type: {order_type}"
+            print(f"         {error_msg}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to invalid order type...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, None
+        
+        # Generate cache key (includes exact symbol with suffix)
+        cache_key = f"{symbol}_{mt5_order_type}_{entry_price}_{volume}"
+        
+        # Check per-order cache
+        if cache_key in per_order_cache:
+            error_msg = "Already placed in this run"
+            print(f"        ⏭️  SKIP - {error_msg}")
+            return False, None, error_msg, cache_key
+        
+        # Check proximity risk ONLY if enabled in settings (but skip for hedge orders)
+        if is_hedge:
+            print(f"        🛡️ HEDGE ORDER: Skipping proximity risk check")
+        elif skip_proximity_check:
+            print(f"        ℹ️  Proximity risk check DISABLED - placing order regardless of position proximity")
+        else:
+            is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions)
+            
+            if is_risk:
+                error_msg = f"Too close to position #{risk_position.ticket if risk_position else 'unknown'}"
+                print(f"        ⚠️  RISK SKIP - {error_msg} (risk: ${risk_amount:.2f} < threshold: ${risk_threshold:.2f})")
+                
+                if timeframe and current_candle_time:
+                    print(f"        🗑️ Removing candle time record due to proximity risk...")
+                    remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+                
+                return False, None, error_msg, cache_key
+        
+        # --- GET SUPPORTED FILLING MODES ---
+        is_pending = order_type not in ['instant_buy', 'instant_sell']
+        filling_modes = get_supported_filling_modes(symbol_info, is_pending)
+        
+        # --- PREPARE REQUEST TEMPLATE (without type_filling) ---
+        if order_type in ['instant_buy', 'instant_sell']:
+            # Market order (instant execution)
+            price = current_ask if order_type == 'instant_buy' else current_bid
+            
+            request_template = {
+                "symbol": symbol,
+                "volume": volume,
+                "type": mt5_order_type,
+                "price": price,
+                "deviation": 20,
+                "magic": magic_number,
+                "comment": f"{strategy_name[:20]} RR{order_data.get('risk_reward', '?')}",
+                "type_time": mt5.ORDER_TIME_GTC,
+            }
+            
+            if exit_price:
+                request_template["sl"] = exit_price
+            if target_price:
+                request_template["tp"] = target_price
+                
+        else:
+            # Pending order
+            request_template = {
+                "symbol": symbol,
+                "volume": volume,
+                "type": mt5_order_type,
+                "price": entry_price,
+                "deviation": 20,
+                "magic": magic_number,
+                "comment": f"{strategy_name[:20]} RR{order_data.get('risk_reward', '?')}",
+                "type_time": mt5.ORDER_TIME_GTC,
+            }
+            
+            if exit_price:
+                request_template["sl"] = exit_price
+            if target_price:
+                request_template["tp"] = target_price
+        
+        # --- SEND ORDER WITH AUTO FILLING MODE RETRY ---
+        result, used_filling_mode, error_msg = send_order_with_auto_filling(
+            request_template, filling_modes, is_pending
+        )
+        
+        # Handle order send failure
+        if result is None:
+            error_msg = f"Order send failed: {error_msg or mt5.last_error()}"
+            print(f"         {error_msg}")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to order send failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, cache_key
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            error_msg = f"Order failed: {result.comment} (code: {result.retcode})"
+            print(f"         {error_msg}")
+            
+            # If we get an MT5 error, add context with word-based descriptions
+            if result.retcode == 10015:  # Invalid price
+                print(f"         💡 Detailed analysis of MT5 error 10015 (Invalid price):")
+                print(f"            - Order type: {order_type.upper()}")
+                print(f"            - Entry price: {entry_price}")
+                print(f"            - Current ASK price: {current_ask}")
+                print(f"            - Current BID price: {current_bid}")
+                
+                if order_type == 'buy_stop':
+                    if entry_price <= current_ask:
+                        print(f"             PROBLEM: Entry price is NOT ABOVE current ASK price")
+                        print(f"               - Current situation: Entry price is {entry_price} which is {'BELOW' if entry_price < current_ask else 'EQUAL TO'} current ASK {current_ask}")
+                        print(f"               - Required: Entry price MUST be ABOVE current ASK price")
+                    else:
+                        points_above = (entry_price - current_ask) / symbol_info.point if symbol_info.point > 0 else 0
+                        print(f"             PROBLEM: Entry price is too close from above")
+                        print(f"               - Distance: {points_above:.1f} points above current ASK")
+                        print(f"               - Required: At least 10 points distance")
+                
+                elif order_type == 'sell_stop':
+                    if entry_price >= current_bid:
+                        print(f"             PROBLEM: Entry price is NOT BELOW current BID price")
+                        print(f"               - Current situation: Entry price is {entry_price} which is {'ABOVE' if entry_price > current_bid else 'EQUAL TO'} current BID {current_bid}")
+                        print(f"               - Required: Entry price MUST be BELOW current BID price")
+                    else:
+                        points_below = (current_bid - entry_price) / symbol_info.point if symbol_info.point > 0 else 0
+                        print(f"             PROBLEM: Entry price is too close from below")
+                        print(f"               - Distance: {points_below:.1f} points below current BID")
+                        print(f"               - Required: At least 10 points distance")
+            
+            if timeframe and current_candle_time:
+                print(f"        🗑️ Removing candle time record due to order placement failure...")
+                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+            
+            return False, None, error_msg, cache_key
+        
+        # Create detailed trade record with ALL fields from original signal
+        trade_record = {}
+        
+        # First, copy ALL fields from the processed order_data
+        for key, value in order_data.items():
+            if not key.startswith('_'):  # Skip internal fields
+                trade_record[key] = value
+        
+        # Add conversion info if applicable
+        if should_convert:
+            trade_record['converted_from'] = original_order_type
+            trade_record['converted_to'] = order_type
+            trade_record['conversion_reason'] = conversion_reason
+            trade_record['original_entry_price'] = entry_price
+            trade_record['converted_at_price'] = current_ask if 'buy' in order_type else current_bid
+            if conversion_error_details:
+                trade_record['conversion_error_details'] = conversion_error_details
+        
+        # Add filling mode info
+        if used_filling_mode:
+            trade_record['filling_mode_used'] = used_filling_mode
+        
+        # Then add MT5-specific fields
+        trade_record.update({
+            'ticket': result.order,
+            'magic': magic_number,
+            'placed_timestamp': datetime.now().isoformat(),
+            'status': 'pending',
+            'mt5_retcode': result.retcode,
+            'mt5_comment': result.comment,
+            'placed_price': entry_price if order_type not in ['instant_buy', 'instant_sell'] else (request_template['price'] if 'price' in request_template else entry_price),
+            'placed_volume': volume,
+            'placed_order_type': order_type,
+            'strategy_name': strategy_name,
+            'symbol_used': symbol,
+            'original_symbol_requested': order_data.get('original_symbol', symbol),
+            'is_hedge_order': is_hedge
+        })
+        
+        # Add any fields from original_signal that might have been missed
+        if original_signal:
+            for key, value in original_signal.items():
+                if key not in trade_record:
+                    trade_record[f'original_{key}'] = value
+        
+        # Save to history
+        syncing_orders_and_pnl_details(investor_root, trade_record, original_signal)
+        
+        conversion_msg = f" [CONVERTED from {original_order_type.upper()}]" if should_convert else ""
+        hedge_msg = " 🛡️[HEDGE]" if is_hedge else ""
+        print(f"        ✅ SUCCESS: {order_type.upper()} {symbol} @ {request_template['price'] if 'price' in request_template else entry_price} (Ticket: {result.order}) [Strategy: {strategy_name}]{conversion_msg}{hedge_msg}")
+        return True, result, None, cache_key
+
+    # --- NEW SUB-FUNCTION 15: PROCESS HEDGE ORDS (NO UNIQUENESS RULES) ---
+    def process_hedge_orders(hedge_signals, investor_root, per_order_cache, existing_positions, 
+                              skip_proximity_check, switch_invalid_to_instant, stats):
+        """
+        Process all hedge orders without any uniqueness restrictions.
+        ALL hedge orders are placed regardless of order type or quantity.
+        """
+        if not hedge_signals:
+            return stats
+        
+        print(f"\n  🛡️ PROCESSING HEDGE ORDERS ({len(hedge_signals)} signals)")
+        print(f"     📌 Hedge orders are EXEMPT from uniqueness rules - ALL will be placed")
+        
+        hedge_placed = 0
+        hedge_failed = 0
+        
+        for idx, signal_wrapper in enumerate(hedge_signals):
+            order_data = signal_wrapper['data']
+            original_signal = signal_wrapper.get('original_signal', {})
+            signals_path = signal_wrapper.get('path')
+            strategy = signal_wrapper.get('strategy', 'unknown')
+            symbol = order_data.get('symbol', '')
+            order_type = order_data.get('order_type', '').lower()
+            hedge_id = order_data.get('hedge_id', 'N/A')
+            
+            print(f"\n      🛡️ Hedge Order {idx+1}/{len(hedge_signals)}: {order_type} {symbol} [ID: {hedge_id[:20]}...]")
+            
+            # Execute the order
+            success, result, error, cache_key = execute_order(
+                order_data, investor_root, per_order_cache, existing_positions,
+                original_signal, skip_proximity_check, switch_invalid_to_instant
+            )
+            
+            if success:
+                print(f"      ✅ HEDGE ORDER SUCCESS: {order_type} {symbol}")
+                hedge_placed += 1
+                stats['orders_placed'] += 1
+                stats['per_order_cache'].add(cache_key)
+                stats['authorized_keys'].add(cache_key)
+            else:
+                print(f"       HEDGE ORDER FAILED: {error}")
+                hedge_failed += 1
+                stats['orders_failed'] += 1
+                
+                # Remove the failed signal from limit_orders.json
+                if signals_path:
+                    signals_file = Path(signals_path)
+                    if signals_file.exists():
+                        remove_signal_from_limit_orders(signals_file, order_data)
+                        stats['records_removed'] += 1
+        
+        print(f"\n  🛡️ HEDGE ORDERS SUMMARY: {hedge_placed} placed, {hedge_failed} failed")
+        return stats
+
+    # --- NEW SUB-FUNCTION 16: PROCESS REGULAR ORDERS WITH FALLBACK LOGIC ---
+    def process_regular_orders_with_fallback(regular_signals_by_key, investor_root, per_order_cache, existing_positions,
+                                              skip_proximity_check, switch_invalid_to_instant, stats):
+        """
+        Process regular (non-hedge) orders with strict uniqueness rules.
+        Only ONE order per (symbol, order_type) will be placed (the newest).
+        If the newest fails, falls back to the second newest.
+        """
+        if not regular_signals_by_key:
+            return stats
+        
+        print(f"\n  📊 PROCESSING REGULAR ORDERS ({len(regular_signals_by_key)} groups)")
+        print(f"     📌 Regular orders MUST follow uniqueness rules - only ONE per symbol/type")
+        
+        fallback_used_count = 0
+        
+        for key, symbol_signals in regular_signals_by_key.items():
+            # Sort signals by current_candle_time (newest first)
+            sorted_signals = sorted(symbol_signals, 
+                                   key=lambda x: x['data'].get('current_candle_time', ''), 
+                                   reverse=True)
+            
+            symbol = sorted_signals[0]['data'].get('symbol', '')
+            order_type = sorted_signals[0]['data'].get('order_type', '')
+            
+            print(f"\n    🎯 Processing group: {key} ({len(sorted_signals)} signals)")
+            print(f"       - Newest signal time: {sorted_signals[0]['data'].get('current_candle_time', 'N/A')}")
+            if len(sorted_signals) > 1:
+                print(f"       - Has fallback signal available")
+            
+            # Try to place the newest order first
+            for idx, signal_wrapper in enumerate(sorted_signals):
+                order_data = signal_wrapper['data']
+                original_signal = signal_wrapper.get('original_signal', {})
+                signals_path = signal_wrapper.get('path')
+                
+                is_fallback = idx > 0
+                order_label = "FALLBACK" if is_fallback else "PRIMARY"
+                
+                print(f"\n      🔄 [{order_label}] Attempting to place {order_type} for {symbol}...")
+                
+                # Execute the order
+                success, result, error, cache_key = execute_order(
+                    order_data, investor_root, per_order_cache, existing_positions,
+                    original_signal, skip_proximity_check, switch_invalid_to_instant
+                )
+                
+                if success:
+                    print(f"      ✅ [{order_label}] SUCCESS: {order_type} order placed for {symbol}")
+                    stats['orders_placed'] += 1
+                    per_order_cache.add(cache_key)
+                    stats['authorized_keys'].add(cache_key)
+                    
+                    if is_fallback:
+                        fallback_used_count += 1
+                        print(f"      🔄 FALLBACK SUCCESSFUL: Used fallback signal for {symbol} {order_type}")
+                    
+                    # If order succeeded, break out of fallback loop
+                    break
+                    
+                else:
+                    print(f"       [{order_label}] FAILED: {error}")
+                    
+                    # Remove the failed signal from limit_orders.json
+                    if signals_path:
+                        signals_file = Path(signals_path)
+                        if signals_file.exists():
+                            remove_signal_from_limit_orders(signals_file, order_data)
+                            stats['records_removed'] += 1
+                    
+                    # If this was the last signal and it failed
+                    if idx == len(sorted_signals) - 1:
+                        print(f"       All attempts failed for {symbol} {order_type}")
+                        stats['orders_failed'] += 1
+        
+        stats['fallback_used'] = fallback_used_count
+        return stats
+
+    # --- MAIN EXECUTION FLOW ---
+    print("\n" + "="*80)
+    print("🚀 STARTING ENHANCED ORDER PLACEMENT ENGINE (WITH HEDGE ORDER EXEMPTION & FALLBACK)")
+    print("="*80)
+    
+    investor_ids = [inv_id] if inv_id else list(usersdictionary.keys())
+    any_orders_placed = False
+    global_stats = {
+        'investors_processed': 0,
+        'investors_blocked': 0,
+        'total_signals_found': 0,
+        'total_hedge_signals': 0,
+        'total_regular_signals': 0,
+        'total_orders_placed': 0,
+        'total_orders_failed': 0,
+        'total_orders_cancelled_regulation': 0,
+        'total_suffix_retries_successful': 0,
+        'total_running_positions': 0,
+        'total_pending_orders': 0,
+        'total_candle_records_removed': 0,
+        'total_proximity_check_disabled': 0,
+        'total_orders_converted': 0,
+        'total_fallback_used': 0,
+        'total_hedge_orders_placed': 0,
+        'total_hedge_orders_failed': 0
+    }
+
+    for user_brokerid in investor_ids:
+        print(f"\n{'='*60}")
+        print(f"📋 INVESTOR: {user_brokerid}")
+        print(f"{'='*60}")
+        
+        resolution_cache = {}
+        investor_root = Path(INV_PATH) / user_brokerid
+        
+        if not investor_root.exists():
+            print(f"   Investor root not found: {investor_root}")
+            continue
+        
+        # STEP 1: Check authorization status
+        can_proceed, activities = check_authorization_status(investor_root)
+        
+        if not can_proceed:
+            print(f"  🚫 INVESTOR BLOCKED - unauthorized actions detected without bypass")
+            global_stats['investors_blocked'] += 1
+            continue
+        
+        # STEP 2: Load proximity risk setting from accountmanagement.json
+        print(f"\n  ⚙️  Loading configuration from accountmanagement.json...")
+        skip_proximity_check = not get_proximity_risk_setting(investor_root)
+        
+        if skip_proximity_check:
+            global_stats['total_proximity_check_disabled'] += 1
+        
+        # STEP 3: Load invalid order conversion setting
+        switch_invalid_to_instant = get_switch_invalid_setting(investor_root)
+        
+        # STEP 4: Take initial snapshot of current pending orders and positions (BEFORE sync)
+        print(f"\n  📸 Taking initial snapshot of current orders/positions...")
+        snapshot_success, snapshot_stats = current_pendingorders_and_positions(investor_root)
+        
+        # STEP 5: Sync existing tradeshistory.json (to get current status and assign position IDs)
+        print(f"\n  🔄 Syncing tradeshistory.json with MT5 (checking all orders/positions)...")
+        sync_success, sync_stats = syncing_orders_and_pnl_details(investor_root)
+        
+        if sync_stats:
+            global_stats['total_running_positions'] += sync_stats.get('running_positions', 0)
+            global_stats['total_pending_orders'] += sync_stats.get('pending_orders', 0)
+            print(f"  📊 Current status: {sync_stats.get('running_positions', 0)} running positions, "
+                  f"{sync_stats.get('pending_orders', 0)} pending orders")
+        
+        # STEP 6: Collect signals from ALL strategy folders (separate hedge from regular)
+        all_signals, hedge_signals, regular_signals = collect_orders_from_signals(investor_root, resolution_cache)
+        
+        if not all_signals:
+            print(f"  ℹ️  No signals found for {user_brokerid}")
+            continue
+        
+        global_stats['investors_processed'] += 1
+        global_stats['total_signals_found'] += len(all_signals)
+        global_stats['total_hedge_signals'] += len(hedge_signals)
+        global_stats['total_regular_signals'] += len(regular_signals)
+        
+        # Count successful suffix retries
+        suffix_retries = sum(1 for s in all_signals if s['data'].get('used_suffix', 'none') != 'none')
+        global_stats['total_suffix_retries_successful'] += suffix_retries
+        if suffix_retries > 0:
+            print(f"  🔄 Successfully applied suffix retry to {suffix_retries} signals")
+        
+        # STEP 7: Get existing positions for risk check
+        existing_positions = mt5.positions_get() or []
+        print(f"  📊 Found {len(existing_positions)} existing open positions for risk check")
+        
+        # STEP 8: Group regular signals by symbol and order_type (buy_stop/sell_stop)
+        # Hedge orders are handled separately without grouping
+        regular_signals_by_key = {}
+        
+        for signal_wrapper in regular_signals:
+            order_data = signal_wrapper['data']
+            symbol = order_data.get('symbol', '')
+            order_type = order_data.get('order_type', '').lower()
+            
+            # Only process stop orders for regular signals
+            if order_type not in ['buy_stop', 'sell_stop']:
+                print(f"  ℹ️  Skipping non-stop regular order: {order_type} for {symbol}")
+                continue
+            
+            key = f"{symbol}_{order_type}"
+            
+            if key not in regular_signals_by_key:
+                regular_signals_by_key[key] = []
+            
+            regular_signals_by_key[key].append(signal_wrapper)
+        
+        print(f"  📊 Grouped regular signals into {len(regular_signals_by_key)} symbol/order_type groups")
+        print(f"  🛡️ Hedge signals: {len(hedge_signals)} (will ALL be placed)")
+        
+        # STEP 9: Per-order cache for this run
+        per_order_cache = set()
+        
+        # STEP 10: Build authorized keys for regulation
+        authorized_keys = set()
+        
+        # STEP 11: Process hedge orders FIRST (no uniqueness rules, all placed)
+        investor_stats = {
+            'orders_placed': 0,
+            'orders_failed': 0,
+            'records_removed': 0,
+            'per_order_cache': per_order_cache,
+            'authorized_keys': authorized_keys,
+            'fallback_used': 0
+        }
+        
+        if hedge_signals:
+            investor_stats = process_hedge_orders(
+                hedge_signals, investor_root, per_order_cache, existing_positions,
+                skip_proximity_check, switch_invalid_to_instant, investor_stats
+            )
+        
+        # STEP 12: Process regular orders with fallback logic (only ONE per symbol/type)
+        if regular_signals_by_key:
+            investor_stats = process_regular_orders_with_fallback(
+                regular_signals_by_key, investor_root, per_order_cache, existing_positions,
+                skip_proximity_check, switch_invalid_to_instant, investor_stats
+            )
+        
+        # Update global stats
+        global_stats['total_orders_placed'] += investor_stats['orders_placed']
+        global_stats['total_orders_failed'] += investor_stats['orders_failed']
+        global_stats['total_candle_records_removed'] += investor_stats['records_removed']
+        global_stats['total_fallback_used'] += investor_stats['fallback_used']
+        
+        # Track hedge-specific stats
+        hedge_placed = sum(1 for s in hedge_signals if s.get('_placed', False))
+        global_stats['total_hedge_orders_placed'] += hedge_placed
+        global_stats['total_hedge_orders_failed'] += len(hedge_signals) - hedge_placed
+        
+        # STEP 13: Regulate orders (cancel unauthorized)
+        print(f"\n  🧹 Running order regulation...")
+        cancelled_count = regulate_orders(investor_root, authorized_keys)
+        global_stats['total_orders_cancelled_regulation'] += cancelled_count
+        
+        # STEP 14: Take final snapshot of current pending orders and positions (AFTER placement and regulation)
+        print(f"\n  📸 Taking final snapshot of current orders/positions...")
+        final_snapshot_success, final_snapshot_stats = current_pendingorders_and_positions(investor_root)
+        
+        # STEP 15: Final sync to capture any changes from regulation (ONLY position details, NO status changes)
+        print(f"\n  🔄 Final sync to capture position details...")
+        final_sync, final_stats = syncing_orders_and_pnl_details(investor_root)
+        
+        if final_stats:
+            print(f"  📊 Final status: {final_stats.get('running_positions', 0)} running positions, "
+                  f"{final_stats.get('pending_orders', 0)} pending orders")
+        
+        # Print investor summary
+        print(f"\n  📊 INVESTOR SUMMARY:")
+        print(f"     • Total signals found: {len(all_signals)} (Hedge: {len(hedge_signals)}, Regular: {len(regular_signals)})")
+        print(f"     • Orders placed: {investor_stats['orders_placed']}")
+        print(f"     • Orders failed: {investor_stats['orders_failed']}")
+        print(f"     • Fallback orders used (regular): {investor_stats['fallback_used']}")
+        print(f"     • Records removed (failed signals): {investor_stats['records_removed']}")
+        if skip_proximity_check:
+            print(f"     • Proximity check: DISABLED")
+        else:
+            print(f"     • Proximity check: ENABLED")
+        print(f"     • Cancelled (regulation): {cancelled_count}")
+        if suffix_retries > 0:
+            print(f"     • Suffix retries successful: {suffix_retries}")
+        if final_stats:
+            print(f"     • Running positions: {final_stats.get('running_positions', 0)}")
+            print(f"     • Pending orders: {final_stats.get('pending_orders', 0)}")
+        
+        if investor_stats['orders_placed'] > 0:
+            any_orders_placed = True
+    
+    # Print global summary
+    print("\n" + "="*80)
+    print("📊 GLOBAL SUMMARY")
+    print("="*80)
+    print(f"  • Investors processed: {global_stats['investors_processed']}")
+    print(f"  • Investors blocked: {global_stats['investors_blocked']}")
+    print(f"  • Investors with proximity check disabled: {global_stats['total_proximity_check_disabled']}")
+    print(f"  • Total signals found: {global_stats['total_signals_found']}")
+    print(f"     - Hedge signals: {global_stats['total_hedge_signals']}")
+    print(f"     - Regular signals: {global_stats['total_regular_signals']}")
+    print(f"  • Total orders placed: {global_stats['total_orders_placed']}")
+    print(f"     - Hedge orders placed: {global_stats['total_hedge_orders_placed']}")
+    print(f"     - Regular orders placed: {global_stats['total_orders_placed'] - global_stats['total_hedge_orders_placed']}")
+    print(f"  • Total orders failed: {global_stats['total_orders_failed']}")
+    print(f"  • Total fallback orders used (regular): {global_stats['total_fallback_used']}")
+    print(f"  • Total orders cancelled (regulation): {global_stats['total_orders_cancelled_regulation']}")
+    print(f"  • Successful suffix retries: {global_stats['total_suffix_retries_successful']}")
+    print(f"  • Total running positions across all investors: {global_stats['total_running_positions']}")
+    print(f"  • Total pending orders across all investors: {global_stats['total_pending_orders']}")
+    print(f"  • Total candle time records removed: {global_stats['total_candle_records_removed']}")
+    print("="*80)
+    
+    return any_orders_placed
+
+def current_pendingorders_and_positions(inv_id=None):
+    """
+    Checks MT5 for current pending orders and open positions.
+    Records them in tradeshistory.json as a "current_orders" entry within the array.
+    Does NOT include closed orders or historical deals.
+    """
+
+    def get_current_orders_from_mt5():
+        """Fetch current pending orders and open positions from MT5."""
+        pending_orders = []
+        open_positions = []
+        
+        # Get all pending orders
+        orders = mt5.orders_get()
+        if orders:
+            for order in orders:
+                order_dict = {
+                    'ticket': order.ticket,
+                    'symbol': order.symbol,
+                    'type': order.type,
+                    'type_name': get_order_type_name(order.type),
+                    'volume_initial': order.volume_initial,
+                    'volume_current': order.volume_current,
+                    'price_open': order.price_open,
+                    'sl': order.sl,
+                    'tp': order.tp,
+                    'magic': order.magic,
+                    'comment': order.comment,
+                    'time_setup': datetime.fromtimestamp(order.time_setup).strftime('%Y-%m-%d %H:%M:%S')
+                }
+                pending_orders.append(order_dict)
+        
+        # Get all open positions
+        positions = mt5.positions_get()
+        if positions:
+            for pos in positions:
+                position_dict = {
+                    'ticket': pos.ticket,
+                    'symbol': pos.symbol,
+                    'type': pos.type,
+                    'type_name': get_position_type_name(pos.type),
+                    'volume': pos.volume,
+                    'price_open': pos.price_open,
+                    'price_current': pos.price_current,
+                    'sl': pos.sl,
+                    'tp': pos.tp,
+                    'magic': pos.magic,
+                    'comment': pos.comment,
+                    'time_open': datetime.fromtimestamp(pos.time).strftime('%Y-%m-%d %H:%M:%S'),
+                    'profit': pos.profit,
+                    'swap': pos.swap if hasattr(pos, 'swap') else 0,
+                    'commission': pos.commission if hasattr(pos, 'commission') else 0
+                }
+                open_positions.append(position_dict)
+        
+        return pending_orders, open_positions
+    
+    def get_order_type_name(order_type):
+        type_names = {
+            mt5.ORDER_TYPE_BUY: 'BUY',
+            mt5.ORDER_TYPE_SELL: 'SELL',
+            mt5.ORDER_TYPE_BUY_LIMIT: 'BUY_LIMIT',
+            mt5.ORDER_TYPE_SELL_LIMIT: 'SELL_LIMIT',
+            mt5.ORDER_TYPE_BUY_STOP: 'BUY_STOP',
+            mt5.ORDER_TYPE_SELL_STOP: 'SELL_STOP'
+        }
+        return type_names.get(order_type, f'UNKNOWN_{order_type}')
+    
+    def get_position_type_name(pos_type):
+        type_names = {
+            mt5.POSITION_TYPE_BUY: 'BUY',
+            mt5.POSITION_TYPE_SELL: 'SELL'
+        }
+        return type_names.get(pos_type, f'UNKNOWN_{pos_type}')
+    
+    def check_existing_ticket(history, ticket, ticket_type):
+        """Check if a ticket already exists in the current_orders snapshot."""
+        for item in history:
+            if isinstance(item, dict) and "current_orders" in item:
+                current_orders = item["current_orders"]
+                
+                # Check in pending orders
+                for order in current_orders.get("pending_orders", []):
+                    if order.get("ticket") == ticket:
+                        return True, "pending_order"
+                
+                # Check in open positions
+                for position in current_orders.get("open_positions", []):
+                    if position.get("ticket") == ticket:
+                        return True, "open_position"
+        return False, None
+    
+    def update_status_in_history(history, ticket, new_status):
+        """Update the status field for a specific ticket in all records."""
+        updated = False
+        for item in history:
+            if isinstance(item, dict):
+                # Check if this item has a ticket field (individual order/position record)
+                if item.get("ticket") == ticket:
+                    item["status"] = new_status
+                    updated = True
+                # Also check if it's part of current_orders (though we handle separately)
+                elif "current_orders" in item:
+                    for order in item["current_orders"].get("pending_orders", []):
+                        if order.get("ticket") == ticket:
+                            # This is in current_orders, we'll update in the main loop
+                            pass
+                    for position in item["current_orders"].get("open_positions", []):
+                        if position.get("ticket") == ticket:
+                            # This is in current_orders, we'll update in the main loop
+                            pass
+        return updated
+    
+    # --- MAIN EXECUTION ---
+    print("\n" + "="*60)
+    print("📊 CURRENT ORDERS & POSITIONS SNAPSHOT")
+    print("="*60)
+    
+    investor_ids = [inv_id] if inv_id else list(usersdictionary.keys())
+    any_updates = False
+    
+    for user_brokerid in investor_ids:
+        print(f"\n  👤 Investor: {user_brokerid}")
+        
+        investor_root = Path(INV_PATH) / user_brokerid
+        
+        if not investor_root.exists():
+            print(f"    ⚠️  Investor root not found: {investor_root}")
+            continue
+        
+        # Read existing tradeshistory.json first to check for duplicates
+        history_path = investor_root / "tradeshistory.json"
+        history = []
+        
+        if history_path.exists():
+            try:
+                with open(history_path, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+            except Exception as e:
+                print(f"    ⚠️  Error reading tradeshistory.json: {e}")
+                history = []
+        
+        # Fetch current state from MT5
+        print(f"    🔍 Fetching current orders and positions from MT5...")
+        pending_orders, open_positions = get_current_orders_from_mt5()
+        
+        # Create sets of active tickets for quick lookup
+        active_pending_tickets = {order['ticket'] for order in pending_orders}
+        active_position_tickets = {pos['ticket'] for pos in open_positions}
+        
+        # Print tickets found and check for duplicates
+        print(f"\n    📋 Found: {len(pending_orders)} pending orders, {len(open_positions)} open positions")
+        
+        # Update status for existing records in history (not just current_orders)
+        print(f"\n    🔄 Updating status for existing records...")
+        
+        # Iterate through all items in history to update status
+        for item in history:
+            if isinstance(item, dict):
+                # Skip the current_orders entry for now, handle separately
+                if "current_orders" in item:
+                    continue
+                
+                ticket = item.get("ticket")
+                if ticket:
+                    if ticket in active_pending_tickets:
+                        if item.get("status") != "pending":
+                            item["status"] = "pending"
+                            print(f"       - Ticket {ticket}: status updated to 'pending'")
+                        else:
+                            print(f"       - Ticket {ticket}: already 'pending'")
+                    elif ticket in active_position_tickets:
+                        if item.get("status") != "running_position":
+                            item["status"] = "running_position"
+                            print(f"       - Ticket {ticket}: status updated to 'running_position'")
+                        else:
+                            print(f"       - Ticket {ticket}: already 'running_position'")
+                    else:
+                        if item.get("status") != "closed":
+                            item["status"] = "closed"
+                            print(f"       - Ticket {ticket}: status updated to 'closed'")
+        
+        # Check pending orders
+        if pending_orders:
+            print(f"\n    🎫 Pending Orders Tickets:")
+            for order in pending_orders:
+                ticket = order['ticket']
+                exists, location = check_existing_ticket(history, ticket, "pending")
+                if exists:
+                    print(f"       - Ticket {ticket} ({order['type_name']}) - ✅ EXISTS! (in {location})")
+                else:
+                    print(f"       - Ticket {ticket} ({order['type_name']}) - 🆕 New")
+        
+        # Check open positions
+        if open_positions:
+            print(f"\n    💼 Open Positions Tickets:")
+            for position in open_positions:
+                ticket = position['ticket']
+                exists, location = check_existing_ticket(history, ticket, "position")
+                if exists:
+                    print(f"       - Ticket {ticket} ({position['type_name']}) - ✅ EXISTS! (in {location})")
+                else:
+                    print(f"       - Ticket {ticket} ({position['type_name']}) - 🆕 New")
+        
+        # Prepare current_orders data
+        current_orders_data = {
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'pending_orders': pending_orders,
+            'open_positions': open_positions
+        }
+        
+        # Remove any existing "current_orders" entry
+        history = [item for item in history if not isinstance(item, dict) or "current_orders" not in item]
+        
+        # Append the new current_orders entry
+        history.append({"current_orders": current_orders_data})
+        
+        # Save back to file
+        try:
+            with open(history_path, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=4)
+            
+            print(f"\n    ✅ Saved current orders snapshot to tradeshistory.json")
+            print(f"       - Pending orders: {len(pending_orders)}")
+            print(f"       - Open positions: {len(open_positions)}")
+            
+            any_updates = True
+            
+        except Exception as e:
+            print(f"     Error saving tradeshistory.json: {e}")
+    
+    print("\n" + "="*60)
+    if any_updates:
+        print("✅ Current orders snapshot completed")
+    else:
+        print("⚠️  No updates made")
+    print("="*60)
+    
+    return any_updates
 
 def history_closed_orders_removal_in_pendingorders(inv_id=None):
     """
@@ -10273,8 +15218,8 @@ def check_pending_orders_risk(inv_id=None):
             maximum_risk_map = config.get("account_balance_maximum_risk_management", {})
             
             print(f"  └─ ⚙️  Risk Configuration Loading:")
-            print(f"      • account_balance_default_risk_management: {'✅ Found' if default_risk_map else '❌ Missing'}")
-            print(f"      • account_balance_maximum_risk_management: {'✅ Found' if maximum_risk_map else '❌ Missing'}")
+            print(f"      • account_balance_default_risk_management: {'✅ Found' if default_risk_map else ' Missing'}")
+            print(f"      • account_balance_maximum_risk_management: {'✅ Found' if maximum_risk_map else ' Missing'}")
             
         except Exception as e:
             print(f"  └─  Failed to read config: {e}")
@@ -11530,8 +16475,6 @@ def apply_dynamic_breakeven(inv_id=None):
     return stats
 
 
-
-
 # real accounts 
 def process_single_investor(inv_folder):
     """
@@ -11596,7 +16539,8 @@ def process_single_investor(inv_folder):
                 return account_stats
             
         #LOOK HERE MOTHERFUCKER
-        additional_candles_for_orders_limitation(inv_id=inv_id)
+        delete_unauthorized_symbol_files(inv_id=inv_id)
+        #additional_candles_for_orders_limitation(inv_id=inv_id)
 
         mt5.shutdown()
         account_stats["success"] = True
@@ -11647,7 +16591,9 @@ def process_single_invest(inv_folder):
         "bullish_liquidators": 0,
         "bearish_liquidators": 0,
         "symbols_ranging": 0,
-        "avg_ranging_cycles": 0
+        "avg_ranging_cycles": 0,
+        "spread_check_skipped": False,
+        "spread_warning_details": None
     }
     
     broker_cfg = usersdictionary.get(inv_id)
@@ -11670,40 +16616,79 @@ def process_single_invest(inv_folder):
             if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
                 mt5.shutdown()
                 return account_stats
-            
-        move_verified_investors()
-        update_verified_investors_file()
-        get_requirements(inv_id=inv_id)
         
-        fetch_ohlc_data_for_investor(inv_id=inv_id)
-        directional_bias(inv_id=inv_id)
-        additional_candles_for_orders_limitation(inv_id=inv_id)
-        create_position_hedge(inv_id=inv_id)
-        #accountmanagement_manager(inv_id=inv_id)
-        deduplicate_orders(inv_id=inv_id)
-        filter_unauthorized_symbols(inv_id=inv_id)
-        filter_unauthorized_timeframes(inv_id=inv_id)
-        backup_limit_orders(inv_id=inv_id)
-        populate_orders_missing_fields(inv_id=inv_id)
-        activate_usd_based_risk_on_empty_pricelevels(inv_id=inv_id)
-        enforce_investors_risk(inv_id=inv_id)
-        calculate_investor_symbols_orders(inv_id=inv_id)
-        padding_tight_usd_risk(inv_id=inv_id)
-        live_usd_risk_and_scaling(inv_id=inv_id)
-        apply_default_prices(inv_id=inv_id)
-        martingale(inv_id=inv_id)
-        place_usd_orders(inv_id=inv_id)
-        orders_reward_correction(inv_id=inv_id)
-        check_pending_orders_risk(inv_id=inv_id)
-        history_closed_orders_removal_in_pendingorders(inv_id=inv_id)
-        apply_dynamic_breakeven(inv_id=inv_id)
+        # =====================================================================
+        # STEP 1: QUICK SPREAD CHECK (LIGHT VERSION THAT SAVES DATA)
+        # =====================================================================
+        print(f"🔍 [{inv_id}] Running quick spread check...")
+        
+        is_wide, spread_details, saved = symbol_spread_alert(inv_id=inv_id)
+        
+        if is_wide:
+            print(f"⚠️ [{inv_id}] WIDE SPREAD DETECTED - Skipping trading operations")
+            print(f"   Affected symbols: {', '.join(SPREAD_WIDE_WARNING['symbols'])}")
+            print(f"   Trading will resume when spreads return to normal levels")
+            
+            # Update account_stats
+            account_stats["spread_check_skipped"] = True
+            account_stats["spread_warning_details"] = spread_details
+            
+            # Run only essential maintenance (no trading)
+            move_verified_investors()
+            update_verified_investors_file()
+            get_requirements(inv_id=inv_id)
 
-        update_verified_investors_file()
-        check_and_record_authorized_actions(inv_id=inv_id)
-        update_investor_info(inv_id=inv_id)
+            # Update files without placing orders
+            update_verified_investors_file()
+            check_and_record_authorized_actions(inv_id=inv_id)
+            update_investor_info(inv_id=inv_id)
+            
+            mt5.shutdown()
+            account_stats["success"] = True
+            return account_stats
+        
+        else:
+            # =====================================================================
+            # STEP 2: SPREADS NORMAL - PROCEED WITH FULL EXECUTION
+            # =====================================================================
+            print(f"✅ [{inv_id}] Spread conditions normal - proceeding with full execution")
+            
+            move_verified_investors()
+            update_verified_investors_file()
+            get_requirements(inv_id=inv_id)
+            
+            additional_candles_for_orders_limitation(inv_id=inv_id)
+            fetch_ohlc_data_for_investor(inv_id=inv_id)
+            directional_bias(inv_id=inv_id)
+            additional_candles_for_orders_limitation(inv_id=inv_id)
+            create_position_hedge(inv_id=inv_id)
+            #accountmanagement_manager(inv_id=inv_id)
+            deduplicate_orders(inv_id=inv_id)
+            filter_unauthorized_symbols(inv_id=inv_id)
+            filter_unauthorized_timeframes(inv_id=inv_id)
+            backup_limit_orders(inv_id=inv_id)
+            populate_orders_missing_fields(inv_id=inv_id)
+            activate_usd_based_risk_on_empty_pricelevels(inv_id=inv_id)
+            enforce_investors_risk(inv_id=inv_id)
+            calculate_investor_symbols_orders(inv_id=inv_id)
+            padding_tight_usd_risk(inv_id=inv_id)
+            live_usd_risk_and_scaling(inv_id=inv_id)
+            apply_default_prices(inv_id=inv_id)
+            martingale(inv_id=inv_id)
+            place_usd_orders(inv_id=inv_id)
+            orders_reward_correction(inv_id=inv_id)
+            check_pending_orders_risk(inv_id=inv_id)
+            history_closed_orders_removal_in_pendingorders(inv_id=inv_id)
+            apply_dynamic_breakeven(inv_id=inv_id)
+
+            update_verified_investors_file()
+            check_and_record_authorized_actions(inv_id=inv_id)
+            update_investor_info(inv_id=inv_id)
         
         mt5.shutdown()
         account_stats["success"] = True
+        account_stats["spread_check_skipped"] = False
+        account_stats["spread_warning_details"] = None
         
     except Exception as e:
         try:
@@ -11733,7 +16718,7 @@ def place_orders_parallel():
     with mp.Pool(processes=len(investor_folders)) as pool:
         results = pool.map(process_single_investor, investor_folders)
 
-    #time.sleep(0.2)
+    #time.sleep(1)
     #place_orders_parallel()
     
     return 

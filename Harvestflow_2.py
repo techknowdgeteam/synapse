@@ -3210,7 +3210,11 @@ def directional_bias(inv_id=None):
                     # Get minimum volume
                     min_volume = get_min_volume()
                     
-                    # Create signal with candle price levels
+                    # Extract candle times
+                    candle_1_time = candle_1.get('time', '')
+                    candle_2_time = candle_2.get('time', '')
+                    
+                    # Create signal with candle price levels and candle times
                     signal = {
                         "symbol": symbol,
                         "timeframe": timeframe,
@@ -3219,10 +3223,12 @@ def directional_bias(inv_id=None):
                         "entry": round(entry_price, digits),
                         "exit": round(exit_price, digits),
                         # Candle 1 (second most recent) details
+                        "candle_1_time": candle_1_time,
                         "candle_1_high": round(candle_1['high'], digits),
                         "candle_1_low": round(candle_1['low'], digits),
                         "candle_1_type": candle_1_type,
                         # Candle 2 (most recent completed) details
+                        "candle_2_time": candle_2_time,
                         "candle_2_high": round(candle_2['high'], digits),
                         "candle_2_low": round(candle_2['low'], digits),
                         "candle_2_type": candle_2_type,
@@ -3249,7 +3255,9 @@ def directional_bias(inv_id=None):
                         print(f"\n  💾 SIGNAL GENERATED: {symbol} [{timeframe}] [{bias_type.upper()}]")
                         print(f"     Order: {order_type} at {round(entry_price, digits)}")
                         print(f"     Exit: {round(exit_price, digits)}")
+                        print(f"     Candle 1 Time: {candle_1_time}")
                         print(f"     Candle 1: {candle_1_type} | High: {round(candle_1['high'], digits)} | Low: {round(candle_1['low'], digits)}")
+                        print(f"     Candle 2 Time: {candle_2_time}")
                         print(f"     Candle 2: {candle_2_type} | High: {round(candle_2['high'], digits)} | Low: {round(candle_2['low'], digits)}")
                         print(f"     Volume: {min_volume}")
                         print(f"     Risk/Reward: {risk_reward}")
@@ -3336,19 +3344,19 @@ def directional_bias(inv_id=None):
 def additional_candles_for_orders_limitation(inv_id=None):
     """
     Fetch the 20 most recent candles for each symbol/timeframe combination
-    found in candle_time_records.json and save to additional_candles.json.
+    found in tradeshistory.json (pending orders) and save to additional_candles.json.
     
-    Identifies and flags candle_1 and candle_2 from the original records by TIME only.
+    Identifies and flags candle_1 and candle_2 from the trade records by TIME only.
     Deletes all candles older than candle_1 (candles that come after candle_1 in time),
     keeping only candles from candle_1 to the most recent (newer candles).
     
     If no candle_1 or candle_2 is found for a symbol/timeframe, the entire record is emptied
     and all candles are deleted.
     
-    NEW: Removes orders from limit_orders.json based on additional candles count
+    Removes orders from limit_orders.json based on additional candles count
     configured in accountmanagement.json settings.remove_orders_if_additonal_candles_is_more_than
     
-    NEW: Cancels MT5 pending orders by looking up ticket numbers from tradeshistory.json
+    Cancels MT5 pending orders by looking up ticket numbers from tradeshistory.json
     and cancelling them directly.
     
     Parameters:
@@ -3426,47 +3434,67 @@ def additional_candles_for_orders_limitation(inv_id=None):
         except Exception as e:
             return None, None
     
-    def load_candle_time_records_full(investor_id, strategy_name):
-        """Load existing candle time records"""
-        strategy_base_dir = Path(INV_PATH) / investor_id / strategy_name
-        records_file = strategy_base_dir / "pending_orders" / "candle_time_records.json"
+    def load_tradeshistory_for_candle_reference(investor_id, strategy_name):
+        """
+        Load tradeshistory.json to get symbol/timeframe pairs and candle reference times.
+        Only includes pending orders that have candle_1_time and candle_2_time.
         
-        if not records_file.exists():
+        Returns:
+        - symbol_timeframe_pairs: List of unique symbol/timeframe combinations
+        - candle_reference_data: Dict mapping key to candle_1_time and candle_2_time
+        """
+        investor_root = Path(INV_PATH) / investor_id
+        history_path = investor_root / "tradeshistory.json"
+        
+        if not history_path.exists():
+            print(f"  ℹ️ No tradeshistory.json found for investor {investor_id}")
             return [], {}
         
         try:
-            with open(records_file, 'r', encoding='utf-8') as f:
-                records = json.load(f)
+            with open(history_path, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
             
             symbol_timeframe_pairs = []
             candle_reference_data = {}
             seen = set()
             
-            for record in records:
-                symbol = record.get("symbol")
-                timeframe = record.get("timeframe")
+            for trade in trades:
+                # Only process pending orders that have the required candle times
+                status = trade.get('status', '')
+                if status != 'pending':
+                    continue
                 
-                if symbol and timeframe:
-                    key = f"{symbol}_{timeframe}"
+                symbol = trade.get('symbol_used') or trade.get('symbol')
+                timeframe = trade.get('timeframe')
+                candle_1_time = trade.get('candle_1_time', '')
+                candle_2_time = trade.get('candle_2_time', '')
+                
+                # Skip if missing required data
+                if not symbol or not timeframe or not candle_1_time or not candle_2_time:
+                    continue
+                
+                key = f"{symbol}_{timeframe}"
+                
+                if key not in seen:
+                    symbol_timeframe_pairs.append({
+                        "symbol": symbol,
+                        "timeframe": timeframe
+                    })
+                    seen.add(key)
                     
-                    if key not in seen:
-                        symbol_timeframe_pairs.append({
-                            "symbol": symbol,
-                            "timeframe": timeframe
-                        })
-                        seen.add(key)
-                        
-                        candle_1 = record.get("candle_1", {})
-                        candle_2 = record.get("candle_2", {})
-                        
-                        candle_reference_data[key] = {
-                            "candle_1_time": candle_1.get("time", ""),
-                            "candle_2_time": candle_2.get("time", "")
-                        }
+                    # Store the candle times for this symbol/timeframe
+                    # Note: If multiple trades exist for same symbol/timeframe, 
+                    # we use the first one's candle times (they should be consistent)
+                    candle_reference_data[key] = {
+                        "candle_1_time": candle_1_time,
+                        "candle_2_time": candle_2_time
+                    }
             
+            print(f"  📋 Loaded {len(symbol_timeframe_pairs)} unique symbol/timeframe pairs from tradeshistory.json (pending orders only)")
             return symbol_timeframe_pairs, candle_reference_data
             
         except Exception as e:
+            print(f"  ⚠️ Error loading tradeshistory.json: {e}")
             return [], {}
     
     def fetch_recent_candles_with_matching(symbol, mt5_timeframe, num_candles, reference_data):
@@ -3623,7 +3651,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
         except Exception as e:
             return False
     
-    # NEW SUBFUNCTION: Load tradeshistory and build order lookup map
+    # SUBFUNCTION: Load tradeshistory and build order lookup map
     def load_tradeshistory_lookup(investor_root):
         """
         Load tradeshistory.json and build a lookup map by symbol, order_type, entry, volume.
@@ -3672,7 +3700,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
             print(f"     ⚠️ Error loading tradeshistory.json: {e}")
             return order_lookup
     
-    # NEW SUBFUNCTION: Cancel MT5 pending orders using ticket from tradeshistory
+    # SUBFUNCTION: Cancel MT5 pending orders using ticket from tradeshistory
     def cancel_mt5_pending_orders_by_ticket(orders_to_cancel_info, investor_root):
         """
         Cancel MT5 pending orders by looking up their ticket numbers from tradeshistory.json.
@@ -3753,7 +3781,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
         Check additional_candles count for each symbol/timeframe and remove orders from limit_orders.json
         if additional candles count exceeds the configured threshold.
         
-        NEW: Also cancels MT5 pending orders using ticket lookup from tradeshistory.json.
+        Also cancels MT5 pending orders using ticket lookup from tradeshistory.json.
         
         Parameters:
         - investor_id: The investor ID
@@ -3857,7 +3885,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
             traceback.print_exc()
             return 0, 0
     
-    # NEW SUBFUNCTION: Update tradeshistory.json to mark orders as cancelled
+    # SUBFUNCTION: Update tradeshistory.json to mark orders as cancelled
     def update_tradeshistory_status(investor_root, cancelled_orders_info):
         """
         Update tradeshistory.json to mark cancelled orders as 'cancelled_by_additional_candles'
@@ -3932,9 +3960,11 @@ def additional_candles_for_orders_limitation(inv_id=None):
                 stats["errors"].append("MT5 initialization failed")
                 return stats
         
-        symbol_timeframe_pairs, candle_reference_data = load_candle_time_records_full(inv_id, strategy_name)
+        # REPLACED: Now loading from tradeshistory.json instead of candle_time_records.json
+        symbol_timeframe_pairs, candle_reference_data = load_tradeshistory_for_candle_reference(inv_id, strategy_name)
         
         if not symbol_timeframe_pairs:
+            print(f"  ℹ️ No pending orders with candle reference times found in tradeshistory.json")
             return stats
         
         additional_candles_data = []
@@ -9377,7 +9407,7 @@ def place_usd_orders(inv_id=None):
     ENHANCED FEATURES:
     1. Detailed tradeshistory.json with complete order information
     2. Per-order cache to prevent duplicate placement in same run
-    3. Proximity risk check against existing positions
+    3. Proximity risk check against existing positions (configurable via accountmanagement.json)
     4. Order regulation - always cancels unauthorized orders
     5. Dynamic order types: buy_stop, sell_stop, buy_limit, sell_limit, instant_buy, instant_sell
     6. No conversion logic - places exactly what limit_orders.json specifies
@@ -9387,6 +9417,7 @@ def place_usd_orders(inv_id=None):
     10. TRACKING: Running positions get unique IDs and proper status tracking
     11. FULL FIELD PRESERVATION: All fields from limit_orders.json preserved in tradeshistory
     12. FAILURE HANDLING: Removes candle_time_records entry if order placement fails
+    13. CONFIGURABLE PROXIMITY RISK: Reads skip_orders_close_to_position from accountmanagement.json
     """
     
     # --- SUFFIX DICTIONARY FOR RETRY LOGIC ---
@@ -9420,7 +9451,42 @@ def place_usd_orders(inv_id=None):
         ".demo"  # Dot demo
     ]
     
-    # --- SUB-FUNCTION 1: REMOVE CANDLE TIME RECORD ON FAILURE ---
+    # --- SUB-FUNCTION 1: LOAD PROXIMITY RISK SETTING FROM ACCOUNTMANAGEMENT.JSON ---
+    def get_proximity_risk_setting(investor_root):
+        """
+        Load skip_orders_close_to_position setting from accountmanagement.json.
+        Returns True if orders should be skipped when too close to positions.
+        Returns False if orders should be placed regardless of proximity.
+        Default: False (don't skip)
+        """
+        acc_mgmt_path = investor_root / "accountmanagement.json"
+        
+        if not acc_mgmt_path.exists():
+            print(f"    ℹ️  No accountmanagement.json found - proximity risk check DISABLED")
+            return False
+        
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            settings = config.get("settings", {})
+            skip_close = settings.get("skip_orders_close_to_position", False)
+            
+            if skip_close:
+                print(f"    ⚠️  Proximity risk check ENABLED (skip_orders_close_to_position: true)")
+                print(f"       - Orders too close to existing positions will be SKIPPED")
+            else:
+                print(f"    ✅ Proximity risk check DISABLED (skip_orders_close_to_position: false)")
+                print(f"       - All orders will be placed regardless of proximity")
+            
+            return skip_close
+            
+        except Exception as e:
+            print(f"    ⚠️  Error reading accountmanagement.json: {e}")
+            print(f"       - Defaulting to proximity risk check DISABLED")
+            return False
+    
+    # --- SUB-FUNCTION 2: REMOVE CANDLE TIME RECORD ON FAILURE ---
     def remove_candle_time_record(investor_root, symbol, timeframe, current_candle_time):
         """
         Remove a candle time record when order placement fails.
@@ -9469,7 +9535,7 @@ def place_usd_orders(inv_id=None):
         
         return removed_count > 0
     
-    # --- SUB-FUNCTION 2: CHECK AUTHORIZATION STATUS ---
+    # --- SUB-FUNCTION 3: CHECK AUTHORIZATION STATUS ---
     def check_authorization_status(investor_root):
         """Check activities.json for unauthorized actions and bypass status"""
         activities_path = investor_root / "activities.json"
@@ -9499,7 +9565,7 @@ def place_usd_orders(inv_id=None):
             print(f"    ⚠️  Error reading activities.json: {e}")
             return True, None
 
-    # --- SUB-FUNCTION 3: GET ORDER TYPE CONSTANTS ---
+    # --- SUB-FUNCTION 4: GET ORDER TYPE CONSTANTS ---
     def get_mt5_order_type(order_type_str):
         """Convert order type string to MT5 constant"""
         order_type_map = {
@@ -9512,7 +9578,7 @@ def place_usd_orders(inv_id=None):
         }
         return order_type_map.get(order_type_str.lower())
 
-    # --- SUB-FUNCTION 4: GET VOLUME FROM SIGNAL ---
+    # --- SUB-FUNCTION 5: GET VOLUME FROM SIGNAL ---
     def get_volume_from_signal(order_data):
         """
         Extract volume from signal data.
@@ -9534,7 +9600,7 @@ def place_usd_orders(inv_id=None):
         # Default volume
         return 0.01
 
-    # --- SUB-FUNCTION 5: CHECK PROXIMITY RISK ---
+    # --- SUB-FUNCTION 6: CHECK PROXIMITY RISK ---
     def check_proximity_risk(order, existing_positions):
         """
         Check if order is too close to existing positions using risk-based calculation.
@@ -9650,7 +9716,7 @@ def place_usd_orders(inv_id=None):
         
         return False, None, 0, 0
 
-    # --- SUB-FUNCTION 6: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
+    # --- SUB-FUNCTION 7: REGULATE ORDERS (CANCEL UNAUTHORIZED) ---
     def regulate_orders(investor_root, authorized_keys):
         """
         Cancel ALL pending orders that are NOT in the authorized list.
@@ -9712,7 +9778,7 @@ def place_usd_orders(inv_id=None):
             print(f"    ⚠️  Error during regulation: {e}")
             return 0
 
-    # --- SUB-FUNCTION 7: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
+    # --- SUB-FUNCTION 8: SYNC & SAVE DETAILED HISTORY WITH RUNNING POSITION TRACKING ---
     def sync_and_save_detailed_history(investor_root, new_trade=None, original_signal_fields=None):
         """
         Synchronizes tradeshistory.json with MT5 terminal.
@@ -9978,7 +10044,7 @@ def place_usd_orders(inv_id=None):
             traceback.print_exc()
             return False, None
     
-    # --- SUB-FUNCTION 8: CHECK IF SYMBOL IS TRADEABLE ---
+    # --- SUB-FUNCTION 9: CHECK IF SYMBOL IS TRADEABLE ---
     def is_symbol_tradeable(symbol):
         """
         Check if a symbol exists AND trading is enabled.
@@ -10009,7 +10075,7 @@ def place_usd_orders(inv_id=None):
         
         return True
 
-    # --- SUB-FUNCTION 9: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
+    # --- SUB-FUNCTION 10: FIND TRADEABLE SYMBOL WITH SUFFIX RETRY ---
     def find_tradeable_symbol_with_retry(base_symbol, resolution_cache):
         """
         Try ALL suffixes one after another until a tradeable symbol is found.
@@ -10051,7 +10117,7 @@ def place_usd_orders(inv_id=None):
         resolution_cache[cache_key] = None
         return None, None
 
-    # --- SUB-FUNCTION 10: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
+    # --- SUB-FUNCTION 11: COLLECT ORDERS FROM SIGNALS WITH FULL FIELD PRESERVATION ---
     def collect_orders_from_signals(investor_root, resolution_cache):
         """
         Collect all orders from limit_orders.json files in ALL strategy subfolders.
@@ -10129,12 +10195,15 @@ def place_usd_orders(inv_id=None):
         print(f"    📡 Total signals collected: {len(entries_with_paths)}")
         return entries_with_paths
 
-    # --- SUB-FUNCTION 11: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
-    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal):
+    # --- SUB-FUNCTION 12: EXECUTE SINGLE ORDER WITH FULL FIELD PRESERVATION AND FAILURE HANDLING ---
+    def execute_order(order_data, investor_root, per_order_cache, existing_positions, original_signal, skip_proximity_check):
         """
         Execute a single order based on its order_type.
         PRESERVES ALL FIELDS from original signal for tradeshistory.
         REMOVES CANDLE TIME RECORD IF ORDER PLACEMENT FAILS.
+        
+        Args:
+            skip_proximity_check: If True, skips proximity risk check entirely
         """
         symbol = order_data.get('symbol')
         order_type = order_data.get('order_type', '').lower()
@@ -10199,19 +10268,22 @@ def place_usd_orders(inv_id=None):
             print(f"        ⏭️  SKIP - {error_msg}")
             return False, None, error_msg, cache_key
         
-        # Check proximity risk
-        is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions)
-        
-        if is_risk:
-            error_msg = f"Too close to position #{risk_position.ticket if risk_position else 'unknown'}"
-            print(f"        ⚠️  RISK SKIP - {error_msg} (risk: ${risk_amount:.2f} < threshold: ${risk_threshold:.2f})")
+        # Check proximity risk ONLY if enabled in settings
+        if skip_proximity_check:
+            print(f"        ℹ️  Proximity risk check DISABLED - placing order regardless of position proximity")
+        else:
+            is_risk, risk_position, risk_amount, risk_threshold = check_proximity_risk(order_data, existing_positions)
             
-            # Remove candle time record if we have the necessary info (risk skip also counts as failure for reprocessing)
-            if timeframe and current_candle_time:
-                print(f"        🗑️ Removing candle time record due to proximity risk...")
-                remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
-            
-            return False, None, error_msg, cache_key
+            if is_risk:
+                error_msg = f"Too close to position #{risk_position.ticket if risk_position else 'unknown'}"
+                print(f"        ⚠️  RISK SKIP - {error_msg} (risk: ${risk_amount:.2f} < threshold: ${risk_threshold:.2f})")
+                
+                # Remove candle time record if we have the necessary info (risk skip also counts as failure for reprocessing)
+                if timeframe and current_candle_time:
+                    print(f"        🗑️ Removing candle time record due to proximity risk...")
+                    remove_candle_time_record(investor_root, order_data.get('original_symbol', symbol), timeframe, current_candle_time)
+                
+                return False, None, error_msg, cache_key
         
         # Prepare request based on order type
         if order_type in ['instant_buy', 'instant_sell']:
@@ -10348,7 +10420,8 @@ def place_usd_orders(inv_id=None):
         'total_suffix_retries_successful': 0,
         'total_running_positions': 0,
         'total_pending_orders': 0,
-        'total_candle_records_removed': 0
+        'total_candle_records_removed': 0,
+        'total_proximity_check_disabled': 0
     }
 
     for user_brokerid in investor_ids:
@@ -10371,7 +10444,14 @@ def place_usd_orders(inv_id=None):
             global_stats['investors_blocked'] += 1
             continue
         
-        # STEP 2: Sync existing tradeshistory.json FIRST (to get current status)
+        # STEP 2: Load proximity risk setting from accountmanagement.json
+        print(f"\n  ⚙️  Loading configuration from accountmanagement.json...")
+        skip_proximity_check = not get_proximity_risk_setting(investor_root)
+        
+        if skip_proximity_check:
+            global_stats['total_proximity_check_disabled'] += 1
+        
+        # STEP 3: Sync existing tradeshistory.json FIRST (to get current status)
         print(f"\n  🔄 Syncing tradeshistory.json with MT5 (checking all orders/positions)...")
         sync_success, sync_stats = sync_and_save_detailed_history(investor_root)
         
@@ -10381,7 +10461,7 @@ def place_usd_orders(inv_id=None):
             print(f"  📊 Current status: {sync_stats.get('running_positions', 0)} running positions, "
                   f"{sync_stats.get('pending_orders', 0)} pending orders")
         
-        # STEP 3: Collect signals from ALL strategy folders
+        # STEP 4: Collect signals from ALL strategy folders
         all_signals = collect_orders_from_signals(investor_root, resolution_cache)
         
         if not all_signals:
@@ -10397,17 +10477,17 @@ def place_usd_orders(inv_id=None):
         if suffix_retries > 0:
             print(f"  🔄 Successfully applied suffix retry to {suffix_retries} signals")
         
-        # STEP 4: Get existing positions for risk check
+        # STEP 5: Get existing positions for risk check
         existing_positions = mt5.positions_get() or []
         print(f"  📊 Found {len(existing_positions)} existing open positions for risk check")
         
-        # STEP 5: Per-order cache for this run
+        # STEP 6: Per-order cache for this run
         per_order_cache = set()
         
-        # STEP 6: Build authorized keys for regulation
+        # STEP 7: Build authorized keys for regulation
         authorized_keys = set()
         
-        # STEP 7: Process each signal
+        # STEP 8: Process each signal
         print(f"\n  📝 Processing {len(all_signals)} signals...")
         
         orders_placed = 0
@@ -10433,9 +10513,9 @@ def place_usd_orders(inv_id=None):
             if original_fields > 0:
                 print(f"        📋 Original signal has {original_fields} fields (will be preserved)")
             
-            # Execute order
+            # Execute order with proximity check setting
             success, result, error, cache_key = execute_order(
-                order_data, investor_root, per_order_cache, existing_positions, original_signal
+                order_data, investor_root, per_order_cache, existing_positions, original_signal, skip_proximity_check
             )
             
             if cache_key:
@@ -10455,11 +10535,11 @@ def place_usd_orders(inv_id=None):
         
         global_stats['total_candle_records_removed'] += records_removed
         
-        # STEP 8: Regulate orders (cancel unauthorized)
+        # STEP 9: Regulate orders (cancel unauthorized)
         print(f"\n  🧹 Running order regulation...")
         cancelled_count = regulate_orders(investor_root, authorized_keys)
         
-        # STEP 9: Final sync to capture any changes from regulation
+        # STEP 10: Final sync to capture any changes from regulation
         print(f"\n  🔄 Final sync to capture all status changes...")
         final_sync, final_stats = sync_and_save_detailed_history(investor_root)
         
@@ -10479,7 +10559,10 @@ def place_usd_orders(inv_id=None):
         print(f"     • Signals processed: {len(all_signals)}")
         print(f"     • Orders placed: {orders_placed}")
         print(f"     • Skipped (duplicate): {orders_skipped_duplicate}")
-        print(f"     • Skipped (proximity risk - records removed): {orders_skipped_risk}")
+        if skip_proximity_check:
+            print(f"     • Proximity check: DISABLED (all orders placed regardless of position distance)")
+        else:
+            print(f"     • Skipped (proximity risk - records removed): {orders_skipped_risk}")
         print(f"     • Failed (records removed): {orders_failed}")
         print(f"     • Cancelled (regulation): {cancelled_count}")
         if suffix_retries > 0:
@@ -10499,6 +10582,7 @@ def place_usd_orders(inv_id=None):
     print("="*80)
     print(f"  • Investors processed: {global_stats['investors_processed']}")
     print(f"  • Investors blocked: {global_stats['investors_blocked']}")
+    print(f"  • Investors with proximity check disabled: {global_stats['total_proximity_check_disabled']}")
     print(f"  • Total signals found: {global_stats['total_signals_found']}")
     print(f"  • Total orders placed: {global_stats['total_orders_placed']}")
     print(f"  • Orders skipped (duplicate): {global_stats['total_orders_skipped_duplicate']}")
@@ -12645,6 +12729,7 @@ def process_single_investor(inv_folder):
         
         fetch_ohlc_data_for_investor(inv_id=inv_id)
         directional_bias(inv_id=inv_id)
+        additional_candles_for_orders_limitation(inv_id=inv_id)
         create_position_hedge(inv_id=inv_id)
         #accountmanagement_manager(inv_id=inv_id)
         deduplicate_orders(inv_id=inv_id)
