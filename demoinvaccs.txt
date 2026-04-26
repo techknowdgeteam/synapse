@@ -1,0 +1,23 @@
+{
+    "deriv_d": {
+        "LOGIN_ID": "5996427",
+        "PASSWORD": "@Techknowdge12#",
+        "SERVER": "deriv-demo",
+        "INVESTED_WITH": "deriv6_double-levels",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\harvore\\mt5\\MetaTrader 5 Deriv d\\terminal64.exe"
+    },
+    "deriv_e": {
+        "LOGIN_ID": "32092095",
+        "PASSWORD": "@Techknowdge12#",
+        "SERVER": "deriv-demo",
+        "INVESTED_WITH": "deriv6_double-levels",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\harvore\\mt5\\MetaTrader 5 Deriv e\\terminal64.exe"
+    },
+    "deriv_f": {
+        "LOGIN_ID": "40940152",
+        "PASSWORD": "@Techknowdge12#",
+        "SERVER": "deriv-demo",
+        "INVESTED_WITH": "deriv6_double-levels",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\harvore\\mt5\\MetaTrader 5 Deriv f\\terminal64.exe"
+    }
+}
